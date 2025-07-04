@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jetson Nano Camera LLM Inference</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .video-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        #videoFeed {
+            max-width: 100%;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        .config-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        input, textarea, select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+        .captured-image {
+            max-width: 100%;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 10px;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Jetson Nano Camera LLM Inference</h1>
+
+        <div class="video-container">
+            <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Camera Feed">
+        </div>
+
+        <div class="config-section">
+            <div class="input-group">
+                <label for="ollamaHost">Ollama Host:</label>
+                <input type="text" id="ollamaHost" value="http://localhost:11434">
+            </div>
+
+            <div class="input-group">
+                <label for="modelName">Model Name:</label>
+                <select id="modelName">
+                    <option value="mistral-small3.1">mistral-small</option>
+                    <option value="gemma3:27b">gemma</option>
+                    <option value="llava">llava</option>
+                    <option value="llava-llama3">llava-llama3</option>
+                    <option value="moondream">moondream</option>
+                    <option value="bakllava">bakllava</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label for="prompt">Prompt:</label>
+            <textarea id="prompt">Describe what you see in this image in detail.</textarea>
+        </div>
+
+        <button id="inferButton" onclick="runInference()">Run Inference</button>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing image...</p>
+        </div>
+
+        <div id="output"></div>
+        <img id="capturedImage" class="captured-image" style="display: none;">
+    </div>
+
+    <script>
+        async function runInference() {
+            const button = document.getElementById('inferButton');
+            const loading = document.getElementById('loading');
+            const output = document.getElementById('output');
+            const capturedImage = document.getElementById('capturedImage');
+
+            button.disabled = true;
+            loading.style.display = 'block';
+            output.textContent = '';
+            capturedImage.style.display = 'none';
+
+            const data = {
+                ollama_host: document.getElementById('ollamaHost').value,
+                model: document.getElementById('modelName').value,
+                prompt: document.getElementById('prompt').value
+            };
+
+            try {
+                const response = await fetch('/capture_and_infer', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    output.textContent = result.response;
+                    capturedImage.src = result.image;
+                    capturedImage.style.display = 'block';
+                } else {
+                    output.textContent = 'Error: ' + (result.error || 'Unknown error');
+                }
+            } catch (error) {
+                output.textContent = 'Error: ' + error.message;
+            } finally {
+                button.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
