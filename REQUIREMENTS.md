@@ -100,7 +100,6 @@ f1-superfan/
 │   └── index.html              # Main web UI
 ├── main.py                     # Main entry point to start all services
 ├── requirements.txt            # Python dependencies
-├── PROJECT_STRUCTURE.md        # This file
 └── REQUIREMENTS.md             # Detailed project requirements
 ```
 
