@@ -39,7 +39,6 @@ class F1SuperfanApp:
             ensure_directory_exists(directory)
 
     def initialize_components(self):
-        """Initialize core application components."""
         # Initialize Image Processor
         self.logger.info("Initializing Image Processor...")
         self.image_processor = ImageProcessor(self.config)
@@ -61,9 +60,7 @@ class F1SuperfanApp:
         signal.signal(signal.SIGTERM, signal_handler)
 
     def run(self):
-        """Run the main application loop."""
         try:
-            # Setup logging
             self.setup_logging()
 
             self.logger.info("=" * 60)
