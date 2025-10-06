@@ -1,125 +1,15 @@
 from flask import Flask, render_template, Response, jsonify, request
 import cv2
 import base64
-from threading import Lock, Thread
 import ollama
 import time
-import subprocess
-import numpy as np
-import os
+from image_processor import ImageProcessor
 
 app = Flask(__name__)
 
-# Camera configuration
-frame_lock = Lock()
-current_frame = None
-camera_initialized = False
-
-
-def capture_single_frame():
-    """Capture a single frame using GStreamer"""
-    try:
-        cmd = [
-            'gst-launch-1.0',
-            'nvarguscamerasrc', 'num-buffers=1',
-            '!', 'video/x-raw(memory:NVMM),width=1280,height=720,format=NV12,framerate=30/1',
-            '!', 'nvvidconv',
-            '!', 'video/x-raw,format=BGRx',
-            '!', 'videoconvert',
-            '!', 'video/x-raw,format=BGR',
-            '!', 'filesink', 'location=/tmp/current_frame.raw'
-        ]
-
-        # Run with timeout and suppress output
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-
-        if result.returncode != 0:
-            print(f"GStreamer error: {result.stderr}")
-            return None
-
-        # Check if file exists and has expected size
-        if not os.path.exists('/tmp/current_frame.raw'):
-            print("Frame file not created")
-            return None
-
-        # Read the raw frame data
-        with open('/tmp/current_frame.raw', 'rb') as f:
-            raw_data = f.read()
-
-        # Convert raw BGR data to numpy array
-        # 1280x720x3 = 2,764,800 bytes
-        expected_size = 1280 * 720 * 3
-        if len(raw_data) != expected_size:
-            print(f"Unexpected frame size: {len(raw_data)}, expected: {expected_size}")
-            return None
-
-        frame = np.frombuffer(raw_data, dtype=np.uint8)
-        frame = frame.reshape((720, 1280, 3))
-
-        # Clean up temporary file
-        try:
-            os.remove('/tmp/current_frame.raw')
-        except:
-            pass
-
-        return frame
-
-    except subprocess.TimeoutExpired:
-        print("Frame capture timeout")
-        return None
-    except Exception as e:
-        print(f"Frame capture error: {e}")
-        return None
-
-
-def init_camera():
-    global camera_initialized
-
-    try:
-        print("Initializing camera with GStreamer subprocess...")
-
-        # Test if GStreamer pipeline works
-        test_frame = capture_single_frame()
-
-        if test_frame is None:
-            raise Exception("Failed to capture test frame")
-
-        print(f"GStreamer pipeline test successful! Frame shape: {test_frame.shape}")
-        camera_initialized = True
-        return True
-
-    except Exception as e:
-        print(f"Camera initialization failed: {e}")
-        return False
-
-
-def capture_frames():
-    global current_frame
-
-    print("Starting frame capture...")
-    while camera_initialized:
-        try:
-            frame = capture_single_frame()
-            if frame is not None:
-                with frame_lock:
-                    current_frame = frame.copy()
-            else:
-                print("Failed to capture frame, retrying...")
-                time.sleep(1)  # Wait longer on failure
-                continue
-
-            time.sleep(0.033)  # ~30 FPS
-        except Exception as e:
-            print(f"Frame capture error: {e}")
-            time.sleep(1)
-
-
-# Initialize camera and start capture thread
-if init_camera():
-    capture_thread = Thread(target=capture_frames, daemon=True)
-    capture_thread.start()
-else:
-    print("WARNING: Camera not available")
+# Initialize image processor
+image_processor = ImageProcessor()
+image_processor.start()
 
 
 @app.route('/')
@@ -131,13 +21,13 @@ def index():
 def video_feed():
     def generate():
         while True:
-            with frame_lock:
-                if current_frame is not None:
-                    ret, buffer = cv2.imencode('.jpg', current_frame)
-                    if ret:
-                        frame_bytes = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            frame = image_processor.get_current_frame()
+            if frame is not None:
+                ret, buffer = cv2.imencode('.jpg', frame)
+                if ret:
+                    frame_bytes = buffer.tobytes()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             time.sleep(0.033)  # ~30 FPS
 
     return Response(generate(),
@@ -147,7 +37,7 @@ def video_feed():
 @app.route('/capture_and_infer', methods=['POST'])
 def capture_and_infer():
     try:
-        if not camera_initialized:
+        if not image_processor.is_initialized():
             return jsonify({'error': 'Camera not available'}), 503
 
         data = request.json
@@ -156,10 +46,9 @@ def capture_and_infer():
         prompt = data.get('prompt', 'Describe this image')
 
         # Capture current frame
-        with frame_lock:
-            if current_frame is None:
-                return jsonify({'error': 'No frame available'}), 400
-            frame = current_frame.copy()
+        frame = image_processor.get_current_frame()
+        if frame is None:
+            return jsonify({'error': 'No frame available'}), 400
 
         # Convert frame to base64 for response
         _, buffer = cv2.imencode('.jpg', frame)
