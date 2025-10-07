@@ -141,6 +141,7 @@ class InferenceWorker:
 
                 extraction_results["extractions"][extraction_type] = response_data
                 logger.info(f"Successfully extracted {extraction_type} data")
+                logger.debug(f"Raw response JSON: {response_data}")
 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON response for {extraction_type}: {e}")

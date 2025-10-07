@@ -5,7 +5,7 @@ camera:
 capture:
   # Capture mode can be 'periodic', 'manual', or 'both'
   mode: "both"
-  interval_seconds: 10
+  interval_seconds: 60
   storage_paths:
     input: "data/input"
     processed: "data/processed"
@@ -17,7 +17,7 @@ llm:
   prompts:
     current_lap: "What is the current lap number shown in the image? Respond with JSON `{\"lap_number\": X}`."
     timing_table: "Extract the full timing table from the image. For each driver, provide position, name, gap, and interval. Provide the response in a JSON object with a key 'timing_table' containing a list of drivers."
-    tire_info: "Extract the tire compound and age for each driver visible in the image. Respond with a JSON object containing a list of drivers with their tire info."
+#    tire_info: "Extract the tire compound and age for each driver visible in the image. Respond with a JSON object containing a list of drivers with their tire info."
 
 database:
   type: "sqlite"
