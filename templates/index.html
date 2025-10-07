@@ -25,6 +25,25 @@
                 </div>
             </section>
 
+            <section class="adhoc-inference-section">
+                <h2>Ad Hoc Inference</h2>
+                <div class="inference-controls">
+                    <div class="prompt-container">
+                        <label for="custom-prompt">Custom Prompt:</label>
+                        <textarea
+                            id="custom-prompt"
+                            rows="3"
+                            placeholder="Enter your custom prompt here...">describe the numerical data you see in this image</textarea>
+                    </div>
+                    <button id="adhoc-inference-btn" class="btn btn-secondary">🔍 Run Inference</button>
+                    <span id="inference-status"></span>
+                </div>
+                <div id="inference-output">
+                    <h3>Inference Output:</h3>
+                    <pre id="inference-result">Waiting for inference...</pre>
+                </div>
+            </section>
+
             <section class="data-section">
                 <h2>Latest Extracted Data</h2>
                 <div id="latest-data">

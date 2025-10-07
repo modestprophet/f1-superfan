@@ -8,7 +8,7 @@ The F1 Superfan project is an application designed to run on an NVIDIA Jetson Na
 
 - **Image Processor**: A service responsible for capturing images from the camera at configured intervals or via manual triggers.
 - **Inference Worker**: A background service that monitors a directory for new images, runs them through the LLM for data extraction, validates the output, and prepares it for storage.
-- **Database Handler**: An abstraction layer that manages storing the extracted data into either a PostgreSQL database or a local SQLite file.
+- **Database Handler**: An abstraction layer that manages storing the extracted data into a PostgreSQL database.
 - **Web Server**: A Flask-based web application that provides a user interface for live video preview, manual capture, and viewing extracted data.
 
 ## 3. Functional Requirements
@@ -40,7 +40,6 @@ The F1 Superfan project is an application designed to run on an NVIDIA Jetson Na
 ### FR-5: Data Storage
 - Validated JSON data shall be persisted to a database.
 - The system shall use a PostgreSQL database if connection details are provided in the configuration.
-- If PostgreSQL is not configured, the system shall automatically fall back to using a local SQLite database file.
 - All extracted data will be stored to allow for historical analysis.
 
 ### FR-6: Image File Management
@@ -82,13 +81,12 @@ f1-superfan/
 │   ├── input/                  # Directory for newly captured images
 │   ├── processed/              # Directory for successfully processed images
 │   ├── failed/                 # Directory for images that failed processing
-│   └── f1_data.db              # SQLite database fallback
 ├── src/
 │   ├── __init__.py
 │   ├── server.py               # Flask web server for UI and API
 │   ├── image_processor.py      # GStreamer camera capture & frame management
 │   ├── inference_worker.py     # Monitors 'input' dir, runs LLM, saves data
-│   ├── database_handler.py     # Handles SQLite/Postgres data storage
+│   ├── database_handler.py     # Handles Postgres data storage
 │   ├── config_loader.py        # Loads and validates config.yaml
 │   └── utils.py                # Shared utility functions (e.g., data validation)
 ├── static/
@@ -133,11 +131,6 @@ llm:
     tire_info: "Extract the tire compound and age for each driver visible in the image. Respond with a JSON object containing a list of drivers with their tire info."
 
 database:
-  # Database type can be 'postgres' or 'sqlite'
-  type: "sqlite"
-
-  # For 'sqlite', only the path is needed
-  path: "data/f1_data.db"
 
   # For 'postgres', fill out the connection details below
   # host: "localhost"

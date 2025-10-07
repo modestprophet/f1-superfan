@@ -4,6 +4,7 @@ import sys
 from src.config_loader import config
 from src.utils import setup_logging, ensure_directory_exists
 from src.image_processor import ImageProcessor
+from src.inference_worker import InferenceWorker
 from src.server import F1SuperfanServer
 
 
@@ -20,6 +21,7 @@ class F1SuperfanApp:
         self.config = config
         self.logger = None
         self.image_processor = None
+        self.inference_worker = None
         self.server = None
 
     def setup_logging(self):
@@ -44,9 +46,14 @@ class F1SuperfanApp:
         self.image_processor = ImageProcessor(self.config)
         self.image_processor.start()
 
+        # Initialize Inference Worker
+        self.logger.info("Initializing Inference Worker...")
+        self.inference_worker = InferenceWorker(self.config, database_handler=None)
+        self.inference_worker.start()
+
         # Initialize Flask server
         self.logger.info("Initializing Flask server...")
-        self.server = F1SuperfanServer(self.config, self.image_processor)
+        self.server = F1SuperfanServer(self.config, self.image_processor, self.inference_worker)
 
     def setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
@@ -96,6 +103,9 @@ class F1SuperfanApp:
         """Gracefully shutdown all components."""
         if self.logger:
             self.logger.info("Shutting down application components...")
+
+        if self.inference_worker:
+            self.inference_worker.stop()
 
         if self.image_processor:
             self.image_processor.stop()

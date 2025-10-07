@@ -12,8 +12,8 @@ capture:
     failed: "data/failed"
 
 llm:
-  ollama_host: "http://localhost:11434"
-  model: "granite3.2-vision:2b"
+  ollama_host: "http://10.0.20.17:11434"
+  model: "granite3.2-vision:latest"
   prompts:
     current_lap: "What is the current lap number shown in the image? Respond with JSON `{\"lap_number\": X}`."
     timing_table: "Extract the full timing table from the image. For each driver, provide position, name, gap, and interval. Provide the response in a JSON object with a key 'timing_table' containing a list of drivers."
