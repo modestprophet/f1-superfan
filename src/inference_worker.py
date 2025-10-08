@@ -6,13 +6,14 @@ import threading
 import base64
 import requests
 from datetime import datetime
+from together import Together
 from src.utils import validate_json_structure, ensure_directory_exists
 
 logger = logging.getLogger(__name__)
 
 
 class InferenceWorker:
-    """Monitors input directory for new images, processes them with Ollama, and manages results."""
+    """Monitors input directory for new images, processes them with Ollama or Together AI, and manages results."""
 
     def __init__(self, config, database_handler=None):
         """
@@ -31,9 +32,16 @@ class InferenceWorker:
         self.failed_dir = self.config.get('capture.storage_paths.failed', 'data/failed')
 
         # Get LLM configuration
+        self.llm_provider = self.config.get('llm.provider', 'ollama')  # 'ollama' or 'together'
         self.ollama_host = self.config.get('llm.ollama_host', 'http://localhost:11434')
-        self.model = self.config.get('llm.model', 'granite3.2-vision:2b')
+        self.ollama_model = self.config.get('llm.ollama_model', 'granite3.2-vision:2b')
+        self.together_model = self.config.get('llm.together_model', 'meta-llama/Llama-4-Scout-17B-16E-Instruct')
         self.prompts = self.config.get('llm.prompts', {})
+
+        # Initialize Together client if using Together AI
+        self.together_client = None
+        if self.llm_provider == 'together':
+            self.together_client = Together()
 
         # Ensure directories exist
         ensure_directory_exists(self.processed_dir)
@@ -44,9 +52,71 @@ class InferenceWorker:
         self.processed_files = set()
         self.worker_thread = None
 
-        logger.info(f"InferenceWorker initialized with model: {self.model}, host: {self.ollama_host}")
+        model = self.together_model if self.llm_provider == 'together' else self.ollama_model
+        logger.info(f"InferenceWorker initialized with provider: {self.llm_provider}, model: {model}")
         logger.info(f"Monitoring input directory: {self.input_dir}")
         logger.info(f"Data extraction prompts: {list(self.prompts.keys())}")
+
+    def _call_together(self, image_path, prompt):
+        """
+        Send image to Together AI for processing with the given prompt.
+
+        Args:
+            image_path: Path to the image file
+            prompt: Text prompt to use for extraction
+
+        Returns:
+            str: Together AI response text or None on failure
+        """
+        try:
+            # Encode image as base64
+            with open(image_path, 'rb') as image_file:
+                image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+
+            # Determine image format
+            image_format = os.path.splitext(image_path)[1].lower().replace('.', '')
+            if image_format == 'jpg':
+                image_format = 'jpeg'
+
+            json_prompt = f"{prompt}\n\nRespond with valid JSON only, no additional text."
+
+            # Make API request
+            stream = self.together_client.chat.completions.create(
+                model=self.together_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": json_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/{image_format};base64,{image_base64}"
+                                },
+                            },
+                        ],
+                    }
+                ],
+                stream=True,
+            )
+
+            # Collect streamed response
+            response_text = ""
+            for chunk in stream:
+                if chunk.choices:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        response_text += content
+
+            if not response_text:
+                logger.error(f"Empty response from Together AI for {image_path}")
+                return None
+
+            return response_text
+
+        except Exception as e:
+            logger.error(f"Together AI API request failed for {image_path}: {e}")
+            return None
 
     def _call_ollama(self, image_path, prompt):
         """
@@ -66,7 +136,7 @@ class InferenceWorker:
 
             # Prepare request payload
             payload = {
-                "model": self.model,
+                "model": self.ollama_model,
                 "prompt": prompt,
                 "images": [image_base64],
                 "format": "json",  # Request JSON format response
@@ -100,6 +170,22 @@ class InferenceWorker:
             logger.error(f"Error processing image {image_path}: {e}")
             return None
 
+    def _call_llm(self, image_path, prompt):
+        """
+        Dispatch to appropriate LLM provider.
+
+        Args:
+            image_path: Path to the image file
+            prompt: Text prompt to use for extraction
+
+        Returns:
+            str: LLM response text or None on failure
+        """
+        if self.llm_provider == 'together':
+            return self._call_together(image_path, prompt)
+        else:
+            return self._call_ollama(image_path, prompt)
+
     def _process_image(self, image_path):
         """
         Process a single image through all configured extraction prompts.
@@ -123,7 +209,7 @@ class InferenceWorker:
         for extraction_type, prompt in self.prompts.items():
             logger.info(f"Extracting {extraction_type} data...")
 
-            response_text = self._call_ollama(image_path, prompt)
+            response_text = self._call_llm(image_path, prompt)
             if response_text is None:
                 return None
 

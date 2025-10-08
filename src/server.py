@@ -108,7 +108,7 @@ class F1SuperfanServer:
                     return jsonify({'error': 'Failed to capture frame'}), 500
 
                 # Call Ollama with custom prompt
-                response_text = self.inference_worker._call_ollama(temp_path, custom_prompt)
+                response_text = self.inference_worker._call_llm(temp_path, custom_prompt)
 
                 # Clean up temp file
                 try:

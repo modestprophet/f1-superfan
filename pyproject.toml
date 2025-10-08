@@ -9,4 +9,5 @@ dependencies = [
     "ollama>=0.6.0",
     "opencv-python>=4.12.0.88",
     "pyyaml>=6.0.3",
+    "together>=1.5.26",
 ]
