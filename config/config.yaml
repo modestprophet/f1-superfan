@@ -10,16 +10,16 @@ capture:
     input: "data/input"
     processed: "data/processed"
     failed: "data/failed"
+    manual: "data/manual"
 
 llm:
   provider: "together"  # or 'ollama'
   ollama_host: "http://10.0.20.17:11434"
   ollama_model: "granite3.2-vision:latest"
-  together_api_key: ${TOGETHER_API_KEY}  # or set directly
   together_model: "meta-llama/Llama-4-Scout-17B-16E-Instruct"
   prompts:
     current_lap: "What is the current lap number shown in the image? Respond with JSON `{\"lap_number\": X}`."
-    timing_table: "Extract the full timing table from the image. For each driver, provide position, name, gap, and interval. Provide the response in a JSON object with a key 'timing_table' containing a list of drivers."
+    timing_table: "Extract the full timing table from the image. For each driver, provide position, name, gap, interval, and current tyre (if available). Provide the response in a JSON object with a key 'timing_table' containing a list of drivers."
 #    tire_info: "Extract the tire compound and age for each driver visible in the image. Respond with a JSON object containing a list of drivers with their tire info."
 
 database:

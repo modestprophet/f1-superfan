@@ -28,6 +28,13 @@
             <section class="adhoc-inference-section">
                 <h2>Ad Hoc Inference</h2>
                 <div class="inference-controls">
+                    <div class="file-selector">
+                        <label for="manual-image-select">Select Image (optional):</label>
+                        <select id="manual-image-select" class="image-select">
+                            <option value="">Loading...</option>
+                        </select>
+                        <button id="refresh-files-btn" class="btn btn-small">🔄</button>
+                    </div>
                     <div class="prompt-container">
                         <label for="custom-prompt">Custom Prompt:</label>
                         <textarea
@@ -35,7 +42,10 @@
                             rows="3"
                             placeholder="Enter your custom prompt here...">describe the numerical data you see in this image</textarea>
                     </div>
-                    <button id="adhoc-inference-btn" class="btn btn-secondary">🔍 Run Inference</button>
+                    <div class="button-group">
+                        <button id="live-inference-btn" class="btn btn-secondary">📹 Live Inference</button>
+                        <button id="image-inference-btn" class="btn btn-secondary">🖼️ Image Inference</button>
+                    </div>
                     <span id="inference-status"></span>
                 </div>
                 <div id="inference-output">
