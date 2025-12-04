@@ -12,6 +12,13 @@ capture:
     failed: "data/failed"
     manual: "data/manual"
 
+database:
+  type: "sqlite"
+  path: "data/f1_data.db"
+
+logging:
+  level: "INFO"
+
 llm:
   provider: "together"  # or 'ollama'
   ollama_host: "http://10.0.20.17:11434"
@@ -19,16 +26,109 @@ llm:
   together_model: "meta-llama/Llama-4-Scout-17B-16E-Instruct"
   prompts:
     full_extraction: |
-      Analyze this F1 timing screen image. Return a SINGLE JSON object with exactly these keys:
-      1. "lap_number": (integer) The current lap number displayed.
-      2. "table_type": (string) One of ["interval", "gap", "tire_age"] based on the column headers (e.g. 'Interval', 'Gap', 'Tire').
-      3. "timing_data": (list of objects) The rows of the timing table.
+      You are an expert F1 Telemetry Optical Character Recognition (OCR) system. Your task is to extract race data from the provided image of an F1 timing screen and output it as a valid, parsable JSON object.
       
-      Do not include any text outside the JSON.
-
-database:
-  type: "sqlite"
-  path: "data/f1_data.db"
-
-logging:
-  level: "INFO"
+      ### OBJECTIVE
+      Analyze the image and return a SINGLE JSON object containing the current state of the race.
+      
+      ### INSTRUCTIONS
+      
+      **1. Identify the Lap Number**
+      Locate the current lap number, usually displayed at the top of the graphic.
+      
+      **2. Determine the Table Type**
+      Analyze the data columns and headers to categorize the table into exactly one of the following types:
+      *   **`interval`**: Represents the time gap to the *driver directly ahead*.
+          *   *Visual Cue:* Column header "Interval".
+          *   *Data Pattern:* Times are random and varied (e.g., +0.5s, +1.2s, +0.3s). They do not necessarily increase as you go down the list.
+      *   **`gap`**: Represents the time gap to the *race leader*.
+          *   *Visual Cue:* Column header "Gap" or "Leader".
+          *   *Data Pattern:* Times increase sequentially as position rank drops (e.g., Pos 2 is +2.0s, Pos 3 is +5.5s, Pos 4 is +12.0s).
+      *   **`tire_age`**: Represents the laps driven on the current tire.
+          *   *Visual Cue:* Header "Tire" or "Laps".
+          *   *Data Pattern:* Data consists of integers (e.g., 14, 22, 5).
+      *   **`pitstops`**: Represents the count of pitstops.
+          *   *Visual Cue:* Header "Stops" or "Pit".
+          *   *Data Pattern:* Small integers (e.g., 0, 1, 2).
+      
+      **3. Extract Race Data (Rows)**
+      For each driver row visible, extract:
+      *   **Position:** The integer rank.
+      *   **Driver:** The 3-character driver code (e.g., VER, HAM, LEC).
+      *   **Data:** The main value in the timing/data column.
+          *   If the driver is in the pits, this usually reads "IN PIT" or "PIT".
+          *   If the driver retired, this usually reads "OUT".
+          *   For the leader in a timing table, this often reads "Leader" or "Interval".
+      *   **Tire:** The tire compound character (S, M, H, I, W) located next to the data.
+          *   *Note:* This character is often visually close to the timing data. Ensure you separate the tire letter from the numeric data.
+      
+      ### OUTPUT FORMAT
+      Output **only** raw JSON. Do not include markdown code blocks (```json), explanations, or any text outside the JSON object.
+      
+      **JSON Structure:**
+      ```json
+      {
+        "lap_number": integer,
+        "table_type": "string (one of: 'interval', 'gap', 'tire_age', 'pitstops')",
+        "race_data": [
+          {
+            "position": integer,
+            "driver": "string",
+            "data": "string or number",
+            "tire": "string (optional, e.g., 'S', 'M', 'H')"
+          }
+        ]
+      }
+      ```
+      
+      ### EXAMPLES
+      
+      **Example 1: Gap to Leader**
+      ```json
+      {
+        "lap_number": 4,
+        "table_type": "gap",
+        "race_data": [
+          {"position": 1, "driver": "RUS", "data": "Leader", "tire": "M"},
+          {"position": 2, "driver": "VER", "data": "+2.408", "tire": "S"},
+          {"position": 3, "driver": "NOR", "data": "+3.285", "tire": "M"}
+        ]
+      }
+      ```
+      
+      **Example 2: Tire Age**
+      ```json
+      {
+        "lap_number": 15,
+        "table_type": "tire_age",
+        "race_data": [
+          {"position": 1, "driver": "RUS", "data": "14", "tire": "M"},
+          {"position": 2, "driver": "VER", "data": "17", "tire": "S"}
+        ]
+      }
+      ```
+      
+      **Example 3: Pitstop Count**
+      ```json
+      {
+        "lap_number": 23,
+        "table_type": "pitstops",
+        "race_data": [
+          {"position": 1, "driver": "RUS", "data": 0},
+          {"position": 2, "driver": "NOR", "data": 1}
+        ]
+      }
+      ```
+      
+      **Example 4: Interval**
+      ```json
+      {
+        "lap_number": 4,
+        "table_type": "interval",
+        "race_data": [
+          {"position": 1, "driver": "RUS", "data": "Leader", "tire": "M"},
+          {"position": 2, "driver": "VER", "data": "+2.379", "tire": "S"},
+          {"position": 3, "driver": "NOR", "data": "+1.187", "tire": "M"}
+        ]
+      }
+      ```
