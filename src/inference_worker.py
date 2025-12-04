@@ -13,41 +13,28 @@ logger = logging.getLogger(__name__)
 
 
 class InferenceWorker:
-    """Monitors input directory for new images, processes them with Ollama or Together AI, and manages results."""
 
     def __init__(self, config, database_handler=None):
-        """
-        Initialize the Inference Worker.
-
-        Args:
-            config: Configuration object
-            database_handler: Database handler instance for storing results
-        """
         self.config = config
         self.database_handler = database_handler
 
-        # Get configured paths
         self.input_dir = self.config.get('capture.storage_paths.input', 'data/input')
         self.processed_dir = self.config.get('capture.storage_paths.processed', 'data/processed')
         self.failed_dir = self.config.get('capture.storage_paths.failed', 'data/failed')
 
-        # Get LLM configuration
-        self.llm_provider = self.config.get('llm.provider', 'ollama')  # 'ollama' or 'together'
+        self.llm_provider = self.config.get('llm.provider', 'ollama')
         self.ollama_host = self.config.get('llm.ollama_host', 'http://localhost:11434')
         self.ollama_model = self.config.get('llm.ollama_model', 'granite3.2-vision:2b')
         self.together_model = self.config.get('llm.together_model', 'meta-llama/Llama-4-Scout-17B-16E-Instruct')
         self.prompts = self.config.get('llm.prompts', {})
 
-        # Initialize Together client if using Together AI
         self.together_client = None
         if self.llm_provider == 'together':
             self.together_client = Together()
 
-        # Ensure directories exist
         ensure_directory_exists(self.processed_dir)
         ensure_directory_exists(self.failed_dir)
 
-        # Worker state
         self.running = False
         self.processed_files = set()
         self.worker_thread = None
@@ -58,29 +45,16 @@ class InferenceWorker:
         logger.info(f"Data extraction prompts: {list(self.prompts.keys())}")
 
     def _call_together(self, image_path, prompt):
-        """
-        Send image to Together AI for processing with the given prompt.
-
-        Args:
-            image_path: Path to the image file
-            prompt: Text prompt to use for extraction
-
-        Returns:
-            str: Together AI response text or None on failure
-        """
         try:
-            # Encode image as base64
             with open(image_path, 'rb') as image_file:
                 image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
 
-            # Determine image format
             image_format = os.path.splitext(image_path)[1].lower().replace('.', '')
             if image_format == 'jpg':
                 image_format = 'jpeg'
 
             json_prompt = f"{prompt}\n\nRespond with valid JSON only, no additional text."
 
-            # Make API request
             stream = self.together_client.chat.completions.create(
                 model=self.together_model,
                 messages=[
@@ -100,7 +74,6 @@ class InferenceWorker:
                 stream=True,
             )
 
-            # Collect streamed response
             response_text = ""
             for chunk in stream:
                 if chunk.choices:
@@ -119,36 +92,22 @@ class InferenceWorker:
             return None
 
     def _call_ollama(self, image_path, prompt):
-        """
-        Send image to Ollama for processing with the given prompt.
-
-        Args:
-            image_path: Path to the image file
-            prompt: Text prompt to use for extraction
-
-        Returns:
-            str: Ollama response text or None on failure
-        """
         try:
-            # Encode image as base64
             with open(image_path, 'rb') as image_file:
                 image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
 
-            # Prepare request payload
             payload = {
                 "model": self.ollama_model,
                 "prompt": prompt,
                 "images": [image_base64],
-                "format": "json",  # Request JSON format response
-                "stream": False  # Disable streaming for simpler parsing
+                "format": "json",
+                "stream": False
             }
 
-            # Make API request
             url = f"{self.ollama_host}/api/generate"
             response = requests.post(url, json=payload, timeout=90)
             response.raise_for_status()
 
-            # Parse the response
             result = response.json()
 
             if 'response' not in result:
@@ -171,41 +130,20 @@ class InferenceWorker:
             return None
 
     def _call_llm(self, image_path, prompt):
-        """
-        Dispatch to appropriate LLM provider.
-
-        Args:
-            image_path: Path to the image file
-            prompt: Text prompt to use for extraction
-
-        Returns:
-            str: LLM response text or None on failure
-        """
         if self.llm_provider == 'together':
             return self._call_together(image_path, prompt)
         else:
             return self._call_ollama(image_path, prompt)
 
     def _process_image(self, image_path):
-        """
-        Process a single image through all configured extraction prompts.
-
-        Args:
-            image_path: Path to the image file
-
-        Returns:
-            dict: Combined extraction results or None on failure
-        """
         logger.info(f"Processing image: {image_path}")
 
-        # Create result dictionary
         extraction_results = {
             "image_filename": os.path.basename(image_path),
             "timestamp": datetime.now().isoformat(),
             "extractions": {}
         }
 
-        # Process each extraction type
         for extraction_type, prompt in self.prompts.items():
             logger.info(f"Extracting {extraction_type} data...")
 
@@ -214,19 +152,14 @@ class InferenceWorker:
                 return None
 
             try:
-                # Strip markdown code fences if present
                 cleaned_response = self._clean_json_response(response_text)
-
-                # Parse as JSON
                 response_data = json.loads(cleaned_response)
 
-                # Validate JSON structure based on extraction type
                 required_keys = self._get_required_keys(extraction_type)
                 if required_keys:
                     is_valid, error_msg = validate_json_structure(response_data, required_keys)
                     if not is_valid:
                         logger.error(f"Validation failed for {extraction_type}: {error_msg}")
-                        # Log the failed response for debugging
                         self._log_error(image_path, "JSON_VALIDATION_FAILED", error_msg, response_data)
                         return None
 
@@ -243,49 +176,24 @@ class InferenceWorker:
         return extraction_results
 
     def _clean_json_response(self, response_text):
-        """
-        Clean JSON response by removing markdown code fences and other formatting.
-
-        Args:
-            response_text: Raw response text from LLM
-
-        Returns:
-            str: Cleaned JSON string
-        """
-        # Remove markdown code fences
         cleaned = response_text.strip()
 
-        # Remove opening code fence with optional language specifier
         if cleaned.startswith('```'):
             lines = cleaned.split('\n')
-            # Remove first line (opening fence)
             lines = lines[1:]
-            # Remove last line if it's a closing fence
             if lines and lines[-1].strip() == '```':
                 lines = lines[:-1]
             cleaned = '\n'.join(lines)
 
-        # Remove any trailing commas before closing brackets (common LLM mistake)
         import re
         cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
 
         return cleaned.strip()
 
     def _get_required_keys(self, extraction_type):
-        """
-        Get required keys for each extraction type for validation.
-
-        Args:
-            extraction_type: Type of extraction
-
-        Returns:
-            list: List of required keys or empty list if no specific validation needed
-        """
-        # Validation for the monolithic prompt defined in config
         if extraction_type == "full_extraction":
             return ["lap_number", "table_type", "timing_data"]
 
-        # Fallback for legacy split prompts
         validation_map = {
             "current_lap": ["lap_number"],
             "timing_table": ["timing_table"],
@@ -294,15 +202,6 @@ class InferenceWorker:
         return validation_map.get(extraction_type, [])
 
     def _log_error(self, image_path, error_type, error_message, response_data=None):
-        """
-        Log error information for a failed image.
-
-        Args:
-            image_path: Path to the failed image
-            error_type: Type of error (e.g., 'JSON_VALIDATION_FAILED')
-            error_message: Detailed error message
-            response_data: Optional response data that caused the error
-        """
         error_log = {
             "timestamp": datetime.now().isoformat(),
             "image_filename": os.path.basename(image_path),
@@ -311,7 +210,6 @@ class InferenceWorker:
             "response_data": response_data
         }
 
-        # Save error log to file
         log_filename = f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         log_path = os.path.join(self.failed_dir, log_filename)
 
@@ -323,16 +221,6 @@ class InferenceWorker:
             logger.error(f"Failed to save error log: {e}")
 
     def _move_file(self, src_path, dest_dir):
-        """
-        Move a file to the specified directory.
-
-        Args:
-            src_path: Source file path
-            dest_dir: Destination directory
-
-        Returns:
-            bool: True if move was successful, False otherwise
-        """
         try:
             dest_path = os.path.join(dest_dir, os.path.basename(src_path))
             os.rename(src_path, dest_path)
@@ -343,38 +231,30 @@ class InferenceWorker:
             return False
 
     def _monitor_loop(self):
-        """Main monitoring loop that processes images in the input directory."""
         logger.info("Starting inference worker monitoring loop...")
 
         while self.running:
             try:
-                # Get list of image files in input directory
                 input_files = [f for f in os.listdir(self.input_dir)
                                if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
 
-                # Process new files
                 for filename in input_files:
                     file_path = os.path.join(self.input_dir, filename)
 
-                    # Skip if already processed
                     if filename in self.processed_files:
                         continue
 
                     logger.info(f"New image detected: {filename}")
 
-                    # Process the image
                     results = self._process_image(file_path)
 
                     if results is None:
-                        # Processing failed
                         self._log_error(file_path, "PROCESSING_FAILED",
                                         "Image processing failed")
                         self._move_file(file_path, self.failed_dir)
                     else:
-                        # Processing succeeded
                         self.processed_files.add(filename)
 
-                        # Store in database if handler is available
                         if self.database_handler:
                             try:
                                 self.database_handler.save_extraction_results(results)
@@ -384,18 +264,15 @@ class InferenceWorker:
                                                 f"Failed to save to database: {e}")
                                 continue
 
-                        # Move to processed directory
                         self._move_file(file_path, self.processed_dir)
 
-                # Sleep before next check
                 time.sleep(1)
 
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {e}")
-                time.sleep(5)  # Wait before retrying
+                time.sleep(5)
 
     def start(self):
-        """Start the inference worker."""
         if self.running:
             logger.warning("Inference worker already running")
             return
@@ -406,7 +283,6 @@ class InferenceWorker:
         logger.info("Inference worker started")
 
     def stop(self):
-        """Stop the inference worker."""
         if not self.running:
             logger.warning("Inference worker not running")
             return
