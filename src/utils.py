@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 
 
@@ -37,5 +38,4 @@ def validate_json_structure(data, required_keys):
 
 
 def ensure_directory_exists(directory_path):
-    import os
     os.makedirs(directory_path, exist_ok=True)

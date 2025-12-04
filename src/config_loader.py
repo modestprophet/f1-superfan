@@ -18,18 +18,9 @@ class Config:
             self.load_config()
 
     def load_config(self, config_path='config/config.yaml'):
-        try:
-            config_file = Path(config_path)
-            if not config_file.exists():
-                raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-            with open(config_file, 'r') as f:
-                self._config = yaml.safe_load(f)
-
-            self._validate_config()
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to load configuration: {e}")
+        with open(config_path, 'r') as f:
+            self._config = yaml.safe_load(f)
+        self._validate_config()
 
     def _validate_config(self):
         required_sections = ['camera', 'capture', 'llm', 'database', 'logging']

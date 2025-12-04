@@ -10,17 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class F1SuperfanServer:
-    """Flask web server for F1 Superfan application."""
-
     def __init__(self, config, image_processor, inference_worker=None):
-        """
-        Initialize the Flask server.
-
-        Args:
-            config: Configuration object
-            image_processor: ImageProcessor instance
-            inference_worker: InferenceWorker instance
-        """
         self.config = config
         self.image_processor = image_processor
         self.inference_worker = inference_worker
@@ -53,88 +43,67 @@ class F1SuperfanServer:
 
         @self.app.route('/manual_capture', methods=['POST'])
         def manual_capture():
-            """Manually trigger a frame capture."""
-            try:
-                if not self.image_processor.is_initialized():
-                    return jsonify({'error': 'Camera not available'}), 503
+            if not self.image_processor.is_initialized():
+                return jsonify({'error': 'Camera not available'}), 503
 
-                # Generate filename with timestamp
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                input_dir = self.config.get('capture.storage_paths.manual', 'data/manual')
-                filename = f"manual_{timestamp}.jpg"
-                output_path = os.path.join(input_dir, filename)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            input_dir = self.config.get('capture.storage_paths.manual', 'data/manual')
+            filename = f"manual_{timestamp}.jpg"
+            output_path = os.path.join(input_dir, filename)
 
-                # Capture frame
-                success = self.image_processor.capture_single_frame(output_path)
+            success = self.image_processor.capture_single_frame(output_path)
 
-                if success:
-                    logger.info(f"Manual capture successful: {filename}")
-                    return jsonify({
-                        'success': True,
-                        'filename': filename,
-                        'message': 'Frame captured successfully'
-                    })
-                else:
-                    return jsonify({'error': 'Failed to capture frame'}), 500
+            if success:
+                logger.info(f"Manual capture: {filename}")
+                return jsonify({
+                    'success': True,
+                    'filename': filename,
+                    'message': 'Frame captured successfully'
+                })
 
-            except Exception as e:
-                logger.error(f"Error in manual capture: {e}")
-                return jsonify({'error': str(e)}), 500
+            return jsonify({'error': 'Failed to capture frame'}), 500
 
         @self.app.route('/adhoc_inference', methods=['POST'])
         def adhoc_inference():
-            """Perform ad hoc inference with custom prompt on live camera feed."""
+            if not self.image_processor.is_initialized():
+                return jsonify({'error': 'Camera not available'}), 503
+
+            if not self.inference_worker:
+                return jsonify({'error': 'Inference worker not available'}), 503
+
+            data = request.get_json()
+            custom_prompt = data.get('prompt', 'describe the numerical data you see in this image')
+
+            if not custom_prompt:
+                return jsonify({'error': 'Prompt is required'}), 400
+
+            logger.info(f"Live inference: {custom_prompt}")
+
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                temp_path = temp_file.name
+
+            success = self.image_processor.capture_single_frame(temp_path)
+            if not success:
+                return jsonify({'error': 'Failed to capture frame'}), 500
+
+            response_text = self.inference_worker._call_llm(temp_path, custom_prompt)
+
             try:
-                if not self.image_processor.is_initialized():
-                    return jsonify({'error': 'Camera not available'}), 503
-
-                if not self.inference_worker:
-                    return jsonify({'error': 'Inference worker not available'}), 503
-
-                # Get custom prompt from request
-                data = request.get_json()
-                custom_prompt = data.get('prompt', 'describe the numerical data you see in this image')
-
-                if not custom_prompt:
-                    return jsonify({'error': 'Prompt is required'}), 400
-
-                logger.info(f"Live inference requested with prompt: {custom_prompt}")
-
-                # Capture frame to temporary file
-                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                    temp_path = temp_file.name
-
-                success = self.image_processor.capture_single_frame(temp_path)
-
-                if not success:
-                    return jsonify({'error': 'Failed to capture frame'}), 500
-
-                # Call Ollama with custom prompt
-                response_text = self.inference_worker._call_llm(temp_path, custom_prompt)
-
-                # Clean up temp file
-                try:
-                    os.unlink(temp_path)
-                except Exception as e:
-                    logger.warning(f"Failed to delete temp file: {e}")
-
-                if response_text is None:
-                    return jsonify({'error': 'Inference failed'}), 500
-
-                logger.info(f"Live inference successful")
-                return jsonify({
-                    'success': True,
-                    'response': response_text,
-                    'prompt': custom_prompt
-                })
-
+                os.unlink(temp_path)
             except Exception as e:
-                logger.error(f"Error in live inference: {e}")
-                return jsonify({'error': str(e)}), 500
+                logger.warning(f"Failed to delete temp file: {e}")
+
+            if response_text is None:
+                return jsonify({'error': 'Inference failed'}), 500
+
+            return jsonify({
+                'success': True,
+                'response': response_text,
+                'prompt': custom_prompt
+            })
 
         @self.app.route('/status')
         def status():
-            """Get system status."""
             return jsonify({
                 'camera_initialized': self.image_processor.is_initialized(),
                 'inference_worker_running': self.inference_worker.running if self.inference_worker else False,
@@ -143,73 +112,52 @@ class F1SuperfanServer:
 
         @self.app.route('/manual_images/list', methods=['GET'])
         def list_manual_images():
-            """Get list of images in the manual directory."""
-            try:
-                if not os.path.exists(self.manual_images_dir):
-                    return jsonify({'error': 'Manual images directory not found'}), 404
+            if not os.path.exists(self.manual_images_dir):
+                return jsonify({'error': 'Manual images directory not found'}), 404
 
-                # Get list of image files
-                image_files = [
-                    f for f in os.listdir(self.manual_images_dir)
-                    if f.lower().endswith(('.png', '.jpg', '.jpeg'))
-                ]
+            image_files = [
+                f for f in os.listdir(self.manual_images_dir)
+                if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+            ]
+            image_files.sort()
 
-                image_files.sort()
-
-                logger.info(f"Found {len(image_files)} manual images")
-                return jsonify({
-                    'success': True,
-                    'files': image_files,
-                    'directory': self.manual_images_dir
-                })
-
-            except Exception as e:
-                logger.error(f"Error listing manual images: {e}")
-                return jsonify({'error': str(e)}), 500
+            logger.info(f"Found {len(image_files)} manual images")
+            return jsonify({
+                'success': True,
+                'files': image_files,
+                'directory': self.manual_images_dir
+            })
 
         @self.app.route('/manual_images/process_custom', methods=['POST'])
         def process_manual_image_custom():
-            """Process a manual image with a custom prompt."""
-            try:
-                if not self.inference_worker:
-                    return jsonify({'error': 'Inference worker not available'}), 503
+            if not self.inference_worker:
+                return jsonify({'error': 'Inference worker not available'}), 503
 
-                # Get data from request
-                data = request.get_json()
-                filename = data.get('filename')
-                custom_prompt = data.get('prompt')
+            data = request.get_json()
+            filename = data.get('filename')
+            custom_prompt = data.get('prompt')
 
-                if not filename:
-                    return jsonify({'error': 'Filename is required'}), 400
+            if not filename:
+                return jsonify({'error': 'Filename is required'}), 400
+            if not custom_prompt:
+                return jsonify({'error': 'Prompt is required'}), 400
 
-                if not custom_prompt:
-                    return jsonify({'error': 'Prompt is required'}), 400
+            image_path = os.path.join(self.manual_images_dir, filename)
+            if not os.path.exists(image_path):
+                return jsonify({'error': 'Image file not found'}), 404
 
-                # Construct full path
-                image_path = os.path.join(self.manual_images_dir, filename)
+            logger.info(f"Processing manual image: {filename}")
 
-                if not os.path.exists(image_path):
-                    return jsonify({'error': 'Image file not found'}), 404
+            response_text = self.inference_worker._call_llm(image_path, custom_prompt)
+            if response_text is None:
+                return jsonify({'error': 'Inference failed'}), 500
 
-                logger.info(f"Processing manual image with custom prompt: {filename}")
-
-                # Call LLM with custom prompt
-                response_text = self.inference_worker._call_llm(image_path, custom_prompt)
-
-                if response_text is None:
-                    return jsonify({'error': 'Inference failed'}), 500
-
-                logger.info(f"Manual image custom processing successful: {filename}")
-                return jsonify({
-                    'success': True,
-                    'filename': filename,
-                    'prompt': custom_prompt,
-                    'response': response_text
-                })
-
-            except Exception as e:
-                logger.error(f"Error processing manual image with custom prompt: {e}")
-                return jsonify({'error': str(e)}), 500
+            return jsonify({
+                'success': True,
+                'filename': filename,
+                'prompt': custom_prompt,
+                'response': response_text
+            })
 
     def _generate_video_stream(self):
         while True:
@@ -223,12 +171,5 @@ class F1SuperfanServer:
             time.sleep(0.033)  # ~30 FPS
 
     def run(self, host='0.0.0.0', port=5000):
-        """
-        Start the Flask server.
-
-        Args:
-            host: Host address
-            port: Port number
-        """
         logger.info(f"Starting Flask server on {host}:{port}")
         self.app.run(host=host, port=port, debug=False, threaded=True)
