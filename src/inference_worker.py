@@ -214,8 +214,11 @@ class InferenceWorker:
                 return None
 
             try:
+                # Strip markdown code fences if present
+                cleaned_response = self._clean_json_response(response_text)
+
                 # Parse as JSON
-                response_data = json.loads(response_text)
+                response_data = json.loads(cleaned_response)
 
                 # Validate JSON structure based on extraction type
                 required_keys = self._get_required_keys(extraction_type)
@@ -223,6 +226,8 @@ class InferenceWorker:
                     is_valid, error_msg = validate_json_structure(response_data, required_keys)
                     if not is_valid:
                         logger.error(f"Validation failed for {extraction_type}: {error_msg}")
+                        # Log the failed response for debugging
+                        self._log_error(image_path, "JSON_VALIDATION_FAILED", error_msg, response_data)
                         return None
 
                 extraction_results["extractions"][extraction_type] = response_data
@@ -232,24 +237,59 @@ class InferenceWorker:
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON response for {extraction_type}: {e}")
                 logger.error(f"Response text: {response_text}")
+                logger.error(f"Cleaned text: {cleaned_response if 'cleaned_response' in locals() else 'N/A'}")
                 return None
 
         return extraction_results
+
+    def _clean_json_response(self, response_text):
+        """
+        Clean JSON response by removing markdown code fences and other formatting.
+
+        Args:
+            response_text: Raw response text from LLM
+
+        Returns:
+            str: Cleaned JSON string
+        """
+        # Remove markdown code fences
+        cleaned = response_text.strip()
+
+        # Remove opening code fence with optional language specifier
+        if cleaned.startswith('```'):
+            lines = cleaned.split('\n')
+            # Remove first line (opening fence)
+            lines = lines[1:]
+            # Remove last line if it's a closing fence
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            cleaned = '\n'.join(lines)
+
+        # Remove any trailing commas before closing brackets (common LLM mistake)
+        import re
+        cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+
+        return cleaned.strip()
 
     def _get_required_keys(self, extraction_type):
         """
         Get required keys for each extraction type for validation.
 
         Args:
-            extraction_type: Type of extraction ('current_lap', 'timing_table', 'tire_info')
+            extraction_type: Type of extraction
 
         Returns:
             list: List of required keys or empty list if no specific validation needed
         """
+        # Validation for the monolithic prompt defined in config
+        if extraction_type == "full_extraction":
+            return ["lap_number", "table_type", "timing_data"]
+
+        # Fallback for legacy split prompts
         validation_map = {
             "current_lap": ["lap_number"],
             "timing_table": ["timing_table"],
-            "tire_info": []  # No specific required keys for tire info
+            "tire_info": []
         }
         return validation_map.get(extraction_type, [])
 

@@ -10,6 +10,7 @@ from src.utils import setup_logging, ensure_directory_exists
 from src.image_processor import ImageProcessor
 from src.inference_worker import InferenceWorker
 from src.server import F1SuperfanServer
+from src.database import DatabaseHandler
 
 
 class F1SuperfanApp:
@@ -27,6 +28,7 @@ class F1SuperfanApp:
         self.image_processor = None
         self.inference_worker = None
         self.server = None
+        self.database_handler = None
         self.periodic_capture_thread = None
         self.running = False
 
@@ -47,6 +49,10 @@ class F1SuperfanApp:
             ensure_directory_exists(directory)
 
     def initialize_components(self):
+        # Initialize Database Handler
+        self.logger.info("Initializing Database Handler...")
+        self.database_handler = DatabaseHandler(self.config)
+
         # Initialize Image Processor
         self.logger.info("Initializing Image Processor...")
         self.image_processor = ImageProcessor(self.config)
@@ -54,7 +60,7 @@ class F1SuperfanApp:
 
         # Initialize Inference Worker
         self.logger.info("Initializing Inference Worker...")
-        self.inference_worker = InferenceWorker(self.config, database_handler=None)
+        self.inference_worker = InferenceWorker(self.config, database_handler=self.database_handler)
         self.inference_worker.start()
 
         # Initialize Flask server

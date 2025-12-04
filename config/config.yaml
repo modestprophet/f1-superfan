@@ -5,7 +5,7 @@ camera:
 capture:
   # Capture mode can be 'periodic', 'manual', or 'both'
   mode: "both"
-  interval_seconds: 6000
+  interval_seconds: 60
   storage_paths:
     input: "data/input"
     processed: "data/processed"
@@ -18,9 +18,13 @@ llm:
   ollama_model: "granite3.2-vision:latest"
   together_model: "meta-llama/Llama-4-Scout-17B-16E-Instruct"
   prompts:
-    current_lap: "What is the current lap number shown in the image? Respond with JSON `{\"lap_number\": X}`."
-    timing_table: "Extract the full timing table from the image. For each driver, provide position, name, gap, interval, and current tyre (if available). Provide the response in a JSON object with a key 'timing_table' containing a list of drivers."
-#    tire_info: "Extract the tire compound and age for each driver visible in the image. Respond with a JSON object containing a list of drivers with their tire info."
+    full_extraction: |
+      Analyze this F1 timing screen image. Return a SINGLE JSON object with exactly these keys:
+      1. "lap_number": (integer) The current lap number displayed.
+      2. "table_type": (string) One of ["interval", "gap", "tire_age"] based on the column headers (e.g. 'Interval', 'Gap', 'Tire').
+      3. "timing_data": (list of objects) The rows of the timing table.
+      
+      Do not include any text outside the JSON.
 
 database:
   type: "sqlite"
