@@ -1,3 +1,9 @@
+race_metadata:
+  year: 2024
+  race_number: 0
+  circuit_name: "Unknown"
+  race_id: 0
+
 camera:
   resolution: "1280x720"
   fps: 30

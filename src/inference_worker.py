@@ -28,6 +28,13 @@ class InferenceWorker:
         self.together_model = self.config.get('llm.together_model', 'meta-llama/Llama-4-Scout-17B-16E-Instruct')
         self.prompts = self.config.get('llm.prompts', {})
 
+        self.current_race_metadata = self.config.get('race_metadata', {
+            'year': datetime.now().year,
+            'race_number': 0,
+            'circuit_name': 'Unknown',
+            'race_id': 0
+        })
+
         self.together_client = None
         if self.llm_provider == 'together':
             self.together_client = Together()
@@ -43,6 +50,10 @@ class InferenceWorker:
         logger.info(f"InferenceWorker initialized with provider: {self.llm_provider}, model: {model}")
         logger.info(f"Monitoring input directory: {self.input_dir}")
         logger.info(f"Data extraction prompts: {list(self.prompts.keys())}")
+
+    def update_race_metadata(self, new_metadata):
+        self.current_race_metadata.update(new_metadata)
+        logger.info(f"Updated race metadata: {self.current_race_metadata}")
 
     def _call_together(self, image_path, prompt):
         try:
@@ -141,6 +152,7 @@ class InferenceWorker:
         extraction_results = {
             "image_filename": os.path.basename(image_path),
             "timestamp": datetime.now().isoformat(),
+            "race_metadata": self.current_race_metadata.copy(),
             "extractions": {}
         }
 
@@ -192,7 +204,7 @@ class InferenceWorker:
 
     def _get_required_keys(self, extraction_type):
         if extraction_type == "full_extraction":
-            return ["lap_number", "table_type", "timing_data"]
+            return ["lap_number", "table_type"]
 
         validation_map = {
             "current_lap": ["lap_number"],

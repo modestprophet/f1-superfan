@@ -10,6 +10,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const inferenceResult = document.getElementById('inference-result');
     const manualImageSelect = document.getElementById('manual-image-select');
     const refreshFilesBtn = document.getElementById('refresh-files-btn');
+    const confYear = document.getElementById('conf-year');
+    const confRaceNum = document.getElementById('conf-race-num');
+    const confCircuit = document.getElementById('conf-circuit');
+    const confRaceId = document.getElementById('conf-race-id');
+    const saveConfigBtn = document.getElementById('save-config-btn');
+    const configStatus = document.getElementById('config-status');
 
     // Manual capture handler
     manualCaptureBtn.addEventListener('click', async function() {
@@ -153,6 +159,68 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Load Race Configuration
+    async function loadRaceConfig() {
+        try {
+            const response = await fetch('/api/race_config');
+            const data = await response.json();
+
+            if (response.ok && !data.error) {
+                confYear.value = data.year || '';
+                confRaceNum.value = data.race_number || '';
+                confCircuit.value = data.circuit_name || '';
+                confRaceId.value = data.race_id || '';
+            }
+        } catch (error) {
+            console.error('Error loading config:', error);
+        }
+    }
+
+    // Save Race Configuration
+saveConfigBtn.addEventListener('click', async function() {
+        try {
+            saveConfigBtn.disabled = true;
+            configStatus.textContent = 'Saving...';
+            configStatus.style.color = '#ffaa00';
+
+            const payload = {};
+
+            // Only include non-empty values
+            if (confYear.value.trim()) payload.year = confYear.value.trim();
+            if (confRaceNum.value.trim()) payload.race_number = confRaceNum.value.trim();
+            if (confCircuit.value.trim()) payload.circuit_name = confCircuit.value.trim();
+            if (confRaceId.value.trim()) payload.race_id = confRaceId.value.trim();
+
+            const response = await fetch('/api/race_config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                configStatus.textContent = '✓ Saved';
+                configStatus.style.color = '#44ff44';
+                setTimeout(() => {
+                    configStatus.textContent = '';
+                }, 3000);
+            } else {
+                configStatus.textContent = `✗ Error: ${data.error}`;
+                configStatus.style.color = '#ff4444';
+            }
+
+        } catch (error) {
+            configStatus.textContent = `✗ Error: ${error.message}`;
+            configStatus.style.color = '#ff4444';
+        } finally {
+            saveConfigBtn.disabled = false;
+        }
+    });
+
+
     // Load manual images list
     async function loadManualImages() {
         try {
@@ -206,6 +274,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Check status on load
     checkStatus();
+
+
+    // Load Race Config on load
+    loadRaceConfig();
 
     // Refresh status periodically
     setInterval(checkStatus, 30000); // Every 30 seconds

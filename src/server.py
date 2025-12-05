@@ -159,6 +159,29 @@ class F1SuperfanServer:
                 'response': response_text
             })
 
+        @self.app.route('/api/race_config', methods=['GET', 'POST'])
+        def race_config():
+            if not self.inference_worker:
+                return jsonify({'error': 'Inference worker not available'}), 503
+
+            if request.method == 'GET':
+                return jsonify(self.inference_worker.current_race_metadata)
+
+            elif request.method == 'POST':
+                data = request.get_json()
+                valid_keys = {'year', 'race_number', 'circuit_name', 'race_id'}
+                new_metadata = {k: v for k, v in data.items() if k in valid_keys}
+
+                try:
+                    if 'year' in new_metadata: new_metadata['year'] = int(new_metadata['year'])
+                    if 'race_number' in new_metadata: new_metadata['race_number'] = int(new_metadata['race_number'])
+                    if 'race_id' in new_metadata: new_metadata['race_id'] = int(new_metadata['race_id'])
+                except ValueError:
+                    return jsonify({'error': 'Invalid data types'}), 400
+
+                self.inference_worker.update_race_metadata(new_metadata)
+                return jsonify({'success': True, 'metadata': self.inference_worker.current_race_metadata})
+
     def _generate_video_stream(self):
         while True:
             frame = self.image_processor.get_current_frame()

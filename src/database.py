@@ -15,13 +15,17 @@ class InferenceResult(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     timestamp = Column(DateTime, default=datetime.now)
+    year = Column(Integer, nullable=True)
+    race_number = Column(Integer, nullable=True)
+    circuit_name = Column(String(100), nullable=True)
+    race_id = Column(Integer, nullable=True)
     lap_number = Column(Integer, nullable=True)
     table_type = Column(String(50), nullable=True)
     data_json = Column(Text, nullable=True)
     processing_status = Column(String(20), default='new')
 
     def __repr__(self):
-        return f"<InferenceResult(id={self.id}, lap={self.lap_number}, type={self.table_type})>"
+        return f"<InferenceResult(id={self.id}, lap={self.lap_number}, type={self.table_type}, race={self.race_number})>"
 
 
 class DatabaseHandler:
@@ -55,15 +59,22 @@ class DatabaseHandler:
             if not extractions:
                 return
 
+            # Get race metadata
+            race_metadata = raw_results.get('race_metadata', {})
+
             key = next(iter(extractions))
             data = extractions[key]
 
             lap_number = data.get('lap_number')
             table_type = data.get('table_type')
-            timing_data = data.get('timing_data', data)
+            timing_data = data.get('timing_data', data.get('timing_table', data))
 
             record = InferenceResult(
                 timestamp=datetime.now(),
+                year=race_metadata.get('year'),
+                race_number=race_metadata.get('race_number'),
+                circuit_name=race_metadata.get('circuit_name'),
+                race_id=race_metadata.get('race_id'),
                 lap_number=lap_number,
                 table_type=table_type,
                 data_json=json.dumps(timing_data),
