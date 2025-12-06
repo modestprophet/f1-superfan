@@ -21,6 +21,7 @@ capture:
 database:
   type: "sqlite"
   path: "data/f1_data.db"
+  processing_interval: 300  # 5 minutes
 
 logging:
   level: "INFO"

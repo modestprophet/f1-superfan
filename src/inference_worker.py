@@ -27,6 +27,7 @@ class InferenceWorker:
         self.ollama_model = self.config.get('llm.ollama_model', 'granite3.2-vision:2b')
         self.together_model = self.config.get('llm.together_model', 'meta-llama/Llama-4-Scout-17B-16E-Instruct')
         self.prompts = self.config.get('llm.prompts', {})
+        self.processing_interval = self.config.get('database.processing_interval', 300)
 
         self.current_race_metadata = self.config.get('race_metadata', {
             'year': datetime.now().year,
@@ -45,10 +46,13 @@ class InferenceWorker:
         self.running = False
         self.processed_files = set()
         self.worker_thread = None
+        self.processing_thread = None
+        self.last_processing_time = 0
 
         model = self.together_model if self.llm_provider == 'together' else self.ollama_model
         logger.info(f"InferenceWorker initialized with provider: {self.llm_provider}, model: {model}")
         logger.info(f"Monitoring input directory: {self.input_dir}")
+        logger.info(f"Processing interval: {self.processing_interval}s")
         logger.info(f"Data extraction prompts: {list(self.prompts.keys())}")
 
     def update_race_metadata(self, new_metadata):
@@ -242,6 +246,81 @@ class InferenceWorker:
             logger.error(f"Failed to move file {src_path}: {e}")
             return False
 
+    def _process_batch(self):
+        """
+        Process all unprocessed inference results.
+        Called periodically by the processing thread.
+        """
+        if not self.database_handler:
+            logger.warning("No database handler available for batch processing")
+            return
+
+        try:
+            unprocessed = self.database_handler.get_unprocessed_results()
+
+            if not unprocessed:
+                logger.debug("No unprocessed inference results found")
+                return
+
+            logger.info(f"Processing {len(unprocessed)} inference results...")
+
+            success_count = 0
+            failed_count = 0
+
+            for inference_result in unprocessed:
+                try:
+                    success = self.database_handler.parse_and_save_timing_data(inference_result)
+
+                    if success:
+                        self.database_handler.update_processing_status(
+                            inference_result.id, 'done'
+                        )
+                        success_count += 1
+                    else:
+                        self.database_handler.update_processing_status(
+                            inference_result.id, 'failed'
+                        )
+                        failed_count += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing inference_result {inference_result.id}: {e}")
+                    try:
+                        self.database_handler.update_processing_status(
+                            inference_result.id, 'failed'
+                        )
+                    except Exception as update_error:
+                        logger.error(f"Failed to update status for {inference_result.id}: {update_error}")
+                    failed_count += 1
+
+            logger.info(f"Batch processing complete: {success_count} successful, {failed_count} failed")
+
+        except Exception as e:
+            logger.error(f"Error in batch processing: {e}")
+
+    def _processing_loop(self):
+        """
+        Periodic processing loop that runs every N seconds.
+        Processes unprocessed inference results in batches.
+        """
+        logger.info("Starting inference result processing loop...")
+
+        while self.running:
+            try:
+                current_time = time.time()
+                time_since_last = current_time - self.last_processing_time
+
+                if time_since_last >= self.processing_interval:
+                    logger.info("Running batch processing...")
+                    self._process_batch()
+                    self.last_processing_time = current_time
+
+                # Sleep for a short interval to avoid tight loop
+                time.sleep(10)
+
+            except Exception as e:
+                logger.error(f"Error in processing loop: {e}")
+                time.sleep(30)
+
     def _monitor_loop(self):
         logger.info("Starting inference worker monitoring loop...")
 
@@ -269,6 +348,8 @@ class InferenceWorker:
 
                         if self.database_handler:
                             try:
+                                # Only save raw inference result
+                                # Processing happens in batch later
                                 self.database_handler.save_extraction_results(results)
                             except Exception as e:
                                 logger.error(f"Failed to save to database: {e}")
@@ -290,8 +371,18 @@ class InferenceWorker:
             return
 
         self.running = True
+        self.last_processing_time = time.time()
+
+        # Start image monitoring thread
         self.worker_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.worker_thread.start()
+
+        # Start batch processing thread
+        if self.database_handler:
+            self.processing_thread = threading.Thread(target=self._processing_loop, daemon=True)
+            self.processing_thread.start()
+            logger.info("Inference result processing thread started")
+
         logger.info("Inference worker started")
 
     def stop(self):
@@ -304,5 +395,8 @@ class InferenceWorker:
 
         if self.worker_thread:
             self.worker_thread.join(timeout=5.0)
+
+        if self.processing_thread:
+            self.processing_thread.join(timeout=5.0)
 
         logger.info("Inference worker stopped")

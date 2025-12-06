@@ -28,6 +28,38 @@ class InferenceResult(Base):
         return f"<InferenceResult(id={self.id}, lap={self.lap_number}, type={self.table_type}, race={self.race_number})>"
 
 
+class RaceTimingData(Base):
+    """Parsed and normalized race timing data."""
+    __tablename__ = 'race_timing_data'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inference_result_id = Column(Integer, nullable=False)  # Link back to original inference
+
+    timestamp = Column(DateTime, default=datetime.now)
+    year = Column(Integer, nullable=True)
+    race_number = Column(Integer, nullable=True)
+    circuit_name = Column(String(100), nullable=True)
+    race_id = Column(Integer, nullable=True)
+    lap_number = Column(Integer, nullable=False)
+
+    position = Column(Integer, nullable=False)
+    driver_code = Column(String(3), nullable=False)
+    tire_compound = Column(String(1), nullable=True)
+
+    gap_to_leader = Column(String(20), nullable=True)
+    interval = Column(String(20), nullable=True)
+    tire_age = Column(Integer, nullable=True)
+    pitstop_count = Column(Integer, nullable=True)
+
+    is_in_pit = Column(Integer, default=0)
+    is_out = Column(Integer, default=0)
+
+    table_type = Column(String(20), nullable=False)
+
+    def __repr__(self):
+        return f"<RaceTimingData(lap={self.lap_number}, pos={self.position}, driver={self.driver_code}, type={self.table_type})>"
+
+
 class DatabaseHandler:
     """Handles database connections and operations."""
 
@@ -89,6 +121,161 @@ class DatabaseHandler:
             session.rollback()
             logger.error(f"Failed to save to database: {e}")
             raise
+        finally:
+            session.close()
+
+    def get_unprocessed_results(self):
+        """
+        Get all InferenceResult records with processing_status = 'new'.
+
+        Returns:
+            list: List of InferenceResult objects
+        """
+        session = self.Session()
+        try:
+            results = session.query(InferenceResult).filter(
+                InferenceResult.processing_status == 'new'
+            ).order_by(InferenceResult.timestamp.asc()).all()
+
+            logger.info(f"Found {len(results)} unprocessed inference results")
+            return results
+        finally:
+            session.close()
+
+    def update_processing_status(self, inference_result_id, status):
+        """
+        Update the processing_status of an InferenceResult.
+
+        Args:
+            inference_result_id (int): The ID of the record
+            status (str): New status ('done' or 'failed')
+        """
+        session = self.Session()
+        try:
+            record = session.query(InferenceResult).filter(
+                InferenceResult.id == inference_result_id
+            ).first()
+
+            if record:
+                record.processing_status = status
+                session.commit()
+                logger.info(f"Updated inference result {inference_result_id} status to '{status}'")
+            else:
+                logger.warning(f"Inference result {inference_result_id} not found")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update processing status: {e}")
+            raise
+        finally:
+            session.close()
+
+    def parse_and_save_timing_data(self, inference_result):
+        """
+        Parse the JSON from InferenceResult and save to RaceTimingData.
+
+        Args:
+            inference_result (InferenceResult): The InferenceResult object to process
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        session = self.Session()
+        try:
+            # Parse the stored JSON
+            data_json = json.loads(inference_result.data_json)
+
+            # Handle different JSON structures (full extraction vs individual)
+            race_data = data_json.get('race_data', [])
+
+            if not race_data:
+                logger.warning(f"No race_data in inference_result {inference_result.id}")
+                return False
+
+            table_type = inference_result.table_type
+            lap_number = inference_result.lap_number
+
+            # Create a record for each driver
+            for driver_entry in race_data:
+                position = driver_entry.get('position')
+                driver_code = driver_entry.get('driver')
+                data_value = driver_entry.get('data')
+                tire = driver_entry.get('tire')
+
+                if not position or not driver_code:
+                    logger.warning(f"Missing position or driver in entry: {driver_entry}")
+                    continue
+
+                # Determine status flags
+                is_in_pit = 1 if isinstance(data_value, str) and 'PIT' in data_value.upper() else 0
+                is_out = 1 if isinstance(data_value, str) and data_value.upper() == 'OUT' else 0
+
+                # Map data to appropriate column based on table_type
+                gap_to_leader = data_value if table_type == 'gap' else None
+                interval = data_value if table_type == 'interval' else None
+                tire_age = int(data_value) if table_type == 'tire_age' and str(data_value).isdigit() else None
+                pitstop_count = int(data_value) if table_type == 'pitstops' and str(data_value).isdigit() else None
+
+                record = RaceTimingData(
+                    inference_result_id=inference_result.id,
+                    timestamp=inference_result.timestamp,
+                    year=inference_result.year,
+                    race_number=inference_result.race_number,
+                    circuit_name=inference_result.circuit_name,
+                    race_id=inference_result.race_id,
+                    lap_number=lap_number,
+                    position=position,
+                    driver_code=driver_code,
+                    tire_compound=tire,
+                    gap_to_leader=gap_to_leader,
+                    interval=interval,
+                    tire_age=tire_age,
+                    pitstop_count=pitstop_count,
+                    is_in_pit=is_in_pit,
+                    is_out=is_out,
+                    table_type=table_type
+                )
+
+                session.add(record)
+
+            session.commit()
+            logger.info(f"Parsed and saved timing data for inference_result {inference_result.id}")
+            return True
+
+        except json.JSONDecodeError as e:
+            session.rollback()
+            logger.error(f"Failed to parse JSON for inference_result {inference_result.id}: {e}")
+            return False
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to parse and save timing data: {e}")
+            return False
+        finally:
+            session.close()
+
+    def get_lap_summary(self, race_id, lap_number):
+        """Get complete timing picture for a specific lap."""
+        session = self.Session()
+        try:
+            results = session.query(RaceTimingData).filter(
+                RaceTimingData.race_id == race_id,
+                RaceTimingData.lap_number == lap_number
+            ).order_by(RaceTimingData.position).all()
+
+            return results
+        finally:
+            session.close()
+
+    def get_driver_race_progression(self, race_id, driver_code):
+        """Get all data for a specific driver across the race."""
+        session = self.Session()
+        try:
+            results = session.query(RaceTimingData).filter(
+                RaceTimingData.race_id == race_id,
+                RaceTimingData.driver_code == driver_code
+            ).order_by(RaceTimingData.lap_number).all()
+
+            return results
         finally:
             session.close()
 
