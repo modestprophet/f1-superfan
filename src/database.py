@@ -21,6 +21,7 @@ class InferenceResult(Base):
     race_id = Column(Integer, nullable=True)
     lap_number = Column(Integer, nullable=True)
     table_type = Column(String(50), nullable=True)
+    safety_car_status = Column(Integer, default=0)
     data_json = Column(Text, nullable=True)
     processing_status = Column(String(20), default='new')
 
@@ -33,7 +34,7 @@ class RaceTimingData(Base):
     __tablename__ = 'race_timing_data'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    inference_result_id = Column(Integer, nullable=False)  # Link back to original inference
+    inference_result_id = Column(Integer, nullable=False)
 
     timestamp = Column(DateTime, default=datetime.now)
     year = Column(Integer, nullable=True)
@@ -53,6 +54,9 @@ class RaceTimingData(Base):
 
     is_in_pit = Column(Integer, default=0)
     is_out = Column(Integer, default=0)
+    is_safety_car = Column(Integer, default=0)
+    is_under_investigation = Column(Integer, default=0)
+    has_penalty = Column(Integer, default=0)
 
     table_type = Column(String(20), nullable=False)
 
@@ -79,27 +83,15 @@ class DatabaseHandler:
         logger.info(f"Database initialized at {db_path}")
 
     def save_extraction_results(self, raw_results):
-        """
-        Save extraction results to the database.
-
-        Args:
-            raw_results (dict): The dictionary returned by InferenceWorker._process_image
-        """
         session = self.Session()
         try:
             extractions = raw_results.get('extractions', {})
             if not extractions:
                 return
 
-            # Get race metadata
             race_metadata = raw_results.get('race_metadata', {})
-
             key = next(iter(extractions))
             data = extractions[key]
-
-            lap_number = data.get('lap_number')
-            table_type = data.get('table_type')
-            timing_data = data.get('timing_data', data.get('timing_table', data))
 
             record = InferenceResult(
                 timestamp=datetime.now(),
@@ -107,9 +99,10 @@ class DatabaseHandler:
                 race_number=race_metadata.get('race_number'),
                 circuit_name=race_metadata.get('circuit_name'),
                 race_id=race_metadata.get('race_id'),
-                lap_number=lap_number,
-                table_type=table_type,
-                data_json=json.dumps(timing_data),
+                lap_number=data.get('lap_number'),
+                table_type=data.get('table_type'),
+                safety_car_status=1 if data.get('safety_car') else 0,
+                data_json=json.dumps(data.get('timing_data', data.get('timing_table', data))),
                 processing_status='new'
             )
 
@@ -125,12 +118,6 @@ class DatabaseHandler:
             session.close()
 
     def get_unprocessed_results(self):
-        """
-        Get all InferenceResult records with processing_status = 'new'.
-
-        Returns:
-            list: List of InferenceResult objects
-        """
         session = self.Session()
         try:
             results = session.query(InferenceResult).filter(
@@ -143,13 +130,6 @@ class DatabaseHandler:
             session.close()
 
     def update_processing_status(self, inference_result_id, status):
-        """
-        Update the processing_status of an InferenceResult.
-
-        Args:
-            inference_result_id (int): The ID of the record
-            status (str): New status ('done' or 'failed')
-        """
         session = self.Session()
         try:
             record = session.query(InferenceResult).filter(
@@ -171,21 +151,9 @@ class DatabaseHandler:
             session.close()
 
     def parse_and_save_timing_data(self, inference_result):
-        """
-        Parse the JSON from InferenceResult and save to RaceTimingData.
-
-        Args:
-            inference_result (InferenceResult): The InferenceResult object to process
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
         session = self.Session()
         try:
-            # Parse the stored JSON
             data_json = json.loads(inference_result.data_json)
-
-            # Handle different JSON structures (full extraction vs individual)
             race_data = data_json.get('race_data', [])
 
             if not race_data:
@@ -195,22 +163,21 @@ class DatabaseHandler:
             table_type = inference_result.table_type
             lap_number = inference_result.lap_number
 
-            # Create a record for each driver
             for driver_entry in race_data:
                 position = driver_entry.get('position')
                 driver_code = driver_entry.get('driver')
                 data_value = driver_entry.get('data')
                 tire = driver_entry.get('tire')
+                investigation = driver_entry.get('investigation', False)
+                penalty = driver_entry.get('penalty', False)
 
                 if not position or not driver_code:
                     logger.warning(f"Missing position or driver in entry: {driver_entry}")
                     continue
 
-                # Determine status flags
                 is_in_pit = 1 if isinstance(data_value, str) and 'PIT' in data_value.upper() else 0
                 is_out = 1 if isinstance(data_value, str) and data_value.upper() == 'OUT' else 0
 
-                # Map data to appropriate column based on table_type
                 gap_to_leader = data_value if table_type == 'gap' else None
                 interval = data_value if table_type == 'interval' else None
                 tire_age = int(data_value) if table_type == 'tire_age' and str(data_value).isdigit() else None
@@ -233,6 +200,9 @@ class DatabaseHandler:
                     pitstop_count=pitstop_count,
                     is_in_pit=is_in_pit,
                     is_out=is_out,
+                    is_safety_car=inference_result.safety_car_status,
+                    is_under_investigation=1 if investigation else 0,
+                    has_penalty=1 if penalty else 0,
                     table_type=table_type
                 )
 
@@ -254,7 +224,6 @@ class DatabaseHandler:
             session.close()
 
     def get_lap_summary(self, race_id, lap_number):
-        """Get complete timing picture for a specific lap."""
         session = self.Session()
         try:
             results = session.query(RaceTimingData).filter(
@@ -267,7 +236,6 @@ class DatabaseHandler:
             session.close()
 
     def get_driver_race_progression(self, race_id, driver_code):
-        """Get all data for a specific driver across the race."""
         session = self.Session()
         try:
             results = session.query(RaceTimingData).filter(
@@ -278,4 +246,3 @@ class DatabaseHandler:
             return results
         finally:
             session.close()
-

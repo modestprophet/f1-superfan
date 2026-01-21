@@ -208,7 +208,7 @@ class InferenceWorker:
 
     def _get_required_keys(self, extraction_type):
         if extraction_type == "full_extraction":
-            return ["lap_number", "table_type"]
+            return ["lap_number", "table_type", "safety_car"]
 
         validation_map = {
             "current_lap": ["lap_number"],
