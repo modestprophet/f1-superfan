@@ -11,6 +11,7 @@ from src.image_processor import ImageProcessor
 from src.inference_worker import InferenceWorker
 from src.server import F1SuperfanServer
 from src.database import DatabaseHandler
+from src.periodic_control import periodic_enabled
 
 
 class F1SuperfanApp:
@@ -66,6 +67,12 @@ class F1SuperfanApp:
 
         self.logger.info(f"Periodic capture enabled. Interval: {interval} seconds.")
         while self.running:
+            # Check if periodic capture is paused
+            if not periodic_enabled.is_set():
+                # Paused – wait a bit before checking again
+                time.sleep(1)
+                continue
+
             try:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 input_dir = self.config.get('capture.storage_paths.input', 'data/input')

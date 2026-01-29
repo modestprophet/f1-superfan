@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 import os
 import tempfile
+from src.periodic_control import periodic_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,25 @@ class F1SuperfanServer:
 
                 self.inference_worker.update_race_metadata(new_metadata)
                 return jsonify({'success': True, 'metadata': self.inference_worker.current_race_metadata})
+
+        @self.app.route('/periodic/pause', methods=['POST'])
+        def pause_periodic():
+            """Pause the periodic capture loop."""
+            periodic_enabled.clear()
+            logger.info("Periodic capture paused")
+            return jsonify({'status': 'paused', 'running': False})
+
+        @self.app.route('/periodic/resume', methods=['POST'])
+        def resume_periodic():
+            """Resume the periodic capture loop."""
+            periodic_enabled.set()
+            logger.info("Periodic capture resumed")
+            return jsonify({'status': 'running', 'running': True})
+
+        @self.app.route('/periodic/status', methods=['GET'])
+        def periodic_status():
+            """Report whether periodic capture is currently active."""
+            return jsonify({'running': periodic_enabled.is_set()})
 
     def _generate_video_stream(self):
         while True:
