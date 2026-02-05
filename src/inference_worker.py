@@ -13,31 +13,37 @@ logger = logging.getLogger(__name__)
 
 
 class InferenceWorker:
-
     def __init__(self, config, database_handler=None):
         self.config = config
         self.database_handler = database_handler
 
-        self.input_dir = self.config.get('capture.storage_paths.input', 'data/input')
-        self.processed_dir = self.config.get('capture.storage_paths.processed', 'data/processed')
-        self.failed_dir = self.config.get('capture.storage_paths.failed', 'data/failed')
+        self.input_dir = self.config.get("capture.storage_paths.input", "data/input")
+        self.processed_dir = self.config.get(
+            "capture.storage_paths.processed", "data/processed"
+        )
+        self.failed_dir = self.config.get("capture.storage_paths.failed", "data/failed")
 
-        self.llm_provider = self.config.get('llm.provider', 'ollama')
-        self.ollama_host = self.config.get('llm.ollama_host', 'http://localhost:11434')
-        self.ollama_model = self.config.get('llm.ollama_model', 'granite3.2-vision:2b')
-        self.together_model = self.config.get('llm.together_model', 'meta-llama/Llama-4-Scout-17B-16E-Instruct')
-        self.prompts = self.config.get('llm.prompts', {})
-        self.processing_interval = self.config.get('database.processing_interval', 300)
+        self.llm_provider = self.config.get("llm.provider", "ollama")
+        self.ollama_host = self.config.get("llm.ollama_host", "http://localhost:11434")
+        self.ollama_model = self.config.get("llm.ollama_model", "granite3.2-vision:2b")
+        self.together_model = self.config.get(
+            "llm.together_model", "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+        )
+        self.prompts = self.config.get("llm.prompts", {})
+        self.processing_interval = self.config.get("database.processing_interval", 300)
 
-        self.current_race_metadata = self.config.get('race_metadata', {
-            'year': datetime.now().year,
-            'race_number': 0,
-            'circuit_name': 'Unknown',
-            'race_id': 0
-        })
+        self.current_race_metadata = self.config.get(
+            "race_metadata",
+            {
+                "year": datetime.now().year,
+                "race_number": 0,
+                "circuit_name": "Unknown",
+                "race_id": 0,
+            },
+        )
 
         self.together_client = None
-        if self.llm_provider == 'together':
+        if self.llm_provider == "together":
             self.together_client = Together()
 
         ensure_directory_exists(self.processed_dir)
@@ -49,8 +55,14 @@ class InferenceWorker:
         self.processing_thread = None
         self.last_processing_time = 0
 
-        model = self.together_model if self.llm_provider == 'together' else self.ollama_model
-        logger.info(f"InferenceWorker initialized with provider: {self.llm_provider}, model: {model}")
+        model = (
+            self.together_model
+            if self.llm_provider == "together"
+            else self.ollama_model
+        )
+        logger.info(
+            f"InferenceWorker initialized with provider: {self.llm_provider}, model: {model}"
+        )
         logger.info(f"Monitoring input directory: {self.input_dir}")
         logger.info(f"Processing interval: {self.processing_interval}s")
         logger.info(f"Data extraction prompts: {list(self.prompts.keys())}")
@@ -61,14 +73,16 @@ class InferenceWorker:
 
     def _call_together(self, image_path, prompt):
         try:
-            with open(image_path, 'rb') as image_file:
-                image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+            with open(image_path, "rb") as image_file:
+                image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
 
-            image_format = os.path.splitext(image_path)[1].lower().replace('.', '')
-            if image_format == 'jpg':
-                image_format = 'jpeg'
+            image_format = os.path.splitext(image_path)[1].lower().replace(".", "")
+            if image_format == "jpg":
+                image_format = "jpeg"
 
-            json_prompt = f"{prompt}\n\nRespond with valid JSON only, no additional text."
+            json_prompt = (
+                f"{prompt}\n\nRespond with valid JSON only, no additional text."
+            )
 
             stream = self.together_client.chat.completions.create(
                 model=self.together_model,
@@ -108,15 +122,15 @@ class InferenceWorker:
 
     def _call_ollama(self, image_path, prompt):
         try:
-            with open(image_path, 'rb') as image_file:
-                image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+            with open(image_path, "rb") as image_file:
+                image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
 
             payload = {
                 "model": self.ollama_model,
                 "prompt": prompt,
                 "images": [image_base64],
                 "format": "json",
-                "stream": False
+                "stream": False,
             }
 
             url = f"{self.ollama_host}/api/generate"
@@ -125,11 +139,11 @@ class InferenceWorker:
 
             result = response.json()
 
-            if 'response' not in result:
+            if "response" not in result:
                 logger.error(f"Invalid response from Ollama: {result}")
                 return None
 
-            return result['response']
+            return result["response"]
 
         except requests.exceptions.Timeout:
             logger.error(f"Ollama API timeout for {image_path}")
@@ -145,7 +159,7 @@ class InferenceWorker:
             return None
 
     def _call_llm(self, image_path, prompt):
-        if self.llm_provider == 'together':
+        if self.llm_provider == "together":
             return self._call_together(image_path, prompt)
         else:
             return self._call_ollama(image_path, prompt)
@@ -157,7 +171,7 @@ class InferenceWorker:
             "image_filename": os.path.basename(image_path),
             "timestamp": datetime.now().isoformat(),
             "race_metadata": self.current_race_metadata.copy(),
-            "extractions": {}
+            "extractions": {},
         }
 
         for extraction_type, prompt in self.prompts.items():
@@ -173,10 +187,19 @@ class InferenceWorker:
 
                 required_keys = self._get_required_keys(extraction_type)
                 if required_keys:
-                    is_valid, error_msg = validate_json_structure(response_data, required_keys)
+                    is_valid, error_msg = validate_json_structure(
+                        response_data, required_keys
+                    )
                     if not is_valid:
-                        logger.error(f"Validation failed for {extraction_type}: {error_msg}")
-                        self._log_error(image_path, "JSON_VALIDATION_FAILED", error_msg, response_data)
+                        logger.error(
+                            f"Validation failed for {extraction_type}: {error_msg}"
+                        )
+                        self._log_error(
+                            image_path,
+                            "JSON_VALIDATION_FAILED",
+                            error_msg,
+                            response_data,
+                        )
                         return None
 
                 extraction_results["extractions"][extraction_type] = response_data
@@ -184,9 +207,13 @@ class InferenceWorker:
                 logger.debug(f"Raw response JSON: {response_data}")
 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON response for {extraction_type}: {e}")
+                logger.error(
+                    f"Failed to parse JSON response for {extraction_type}: {e}"
+                )
                 logger.error(f"Response text: {response_text}")
-                logger.error(f"Cleaned text: {cleaned_response if 'cleaned_response' in locals() else 'N/A'}")
+                logger.error(
+                    f"Cleaned text: {cleaned_response if 'cleaned_response' in locals() else 'N/A'}"
+                )
                 return None
 
         return extraction_results
@@ -194,26 +221,27 @@ class InferenceWorker:
     def _clean_json_response(self, response_text):
         cleaned = response_text.strip()
 
-        if cleaned.startswith('```'):
-            lines = cleaned.split('\n')
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
             lines = lines[1:]
-            if lines and lines[-1].strip() == '```':
+            if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
-            cleaned = '\n'.join(lines)
+            cleaned = "\n".join(lines)
 
         import re
-        cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+
+        cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
 
         return cleaned.strip()
 
     def _get_required_keys(self, extraction_type):
         if extraction_type == "full_extraction":
-            return ["lap_number", "table_type", "safety_car"]
+            return ["lap_number", "race_data"]
 
         validation_map = {
             "current_lap": ["lap_number"],
             "timing_table": ["timing_table"],
-            "tire_info": []
+            "tire_info": [],
         }
         return validation_map.get(extraction_type, [])
 
@@ -223,14 +251,14 @@ class InferenceWorker:
             "image_filename": os.path.basename(image_path),
             "error_type": error_type,
             "error_message": error_message,
-            "response_data": response_data
+            "response_data": response_data,
         }
 
         log_filename = f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         log_path = os.path.join(self.failed_dir, log_filename)
 
         try:
-            with open(log_path, 'w') as f:
+            with open(log_path, "w") as f:
                 json.dump(error_log, f, indent=2)
             logger.error(f"Error log saved: {log_path}")
         except Exception as e:
@@ -269,30 +297,38 @@ class InferenceWorker:
 
             for inference_result in unprocessed:
                 try:
-                    success = self.database_handler.parse_and_save_timing_data(inference_result)
+                    success = self.database_handler.parse_and_save_timing_data(
+                        inference_result
+                    )
 
                     if success:
                         self.database_handler.update_processing_status(
-                            inference_result.id, 'done'
+                            inference_result.id, "done"
                         )
                         success_count += 1
                     else:
                         self.database_handler.update_processing_status(
-                            inference_result.id, 'failed'
+                            inference_result.id, "failed"
                         )
                         failed_count += 1
 
                 except Exception as e:
-                    logger.error(f"Error processing inference_result {inference_result.id}: {e}")
+                    logger.error(
+                        f"Error processing inference_result {inference_result.id}: {e}"
+                    )
                     try:
                         self.database_handler.update_processing_status(
-                            inference_result.id, 'failed'
+                            inference_result.id, "failed"
                         )
                     except Exception as update_error:
-                        logger.error(f"Failed to update status for {inference_result.id}: {update_error}")
+                        logger.error(
+                            f"Failed to update status for {inference_result.id}: {update_error}"
+                        )
                     failed_count += 1
 
-            logger.info(f"Batch processing complete: {success_count} successful, {failed_count} failed")
+            logger.info(
+                f"Batch processing complete: {success_count} successful, {failed_count} failed"
+            )
 
         except Exception as e:
             logger.error(f"Error in batch processing: {e}")
@@ -326,8 +362,11 @@ class InferenceWorker:
 
         while self.running:
             try:
-                input_files = [f for f in os.listdir(self.input_dir)
-                               if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                input_files = [
+                    f
+                    for f in os.listdir(self.input_dir)
+                    if f.lower().endswith((".png", ".jpg", ".jpeg"))
+                ]
 
                 for filename in input_files:
                     file_path = os.path.join(self.input_dir, filename)
@@ -340,8 +379,9 @@ class InferenceWorker:
                     results = self._process_image(file_path)
 
                     if results is None:
-                        self._log_error(file_path, "PROCESSING_FAILED",
-                                        "Image processing failed")
+                        self._log_error(
+                            file_path, "PROCESSING_FAILED", "Image processing failed"
+                        )
                         self._move_file(file_path, self.failed_dir)
                     else:
                         self.processed_files.add(filename)
@@ -353,8 +393,11 @@ class InferenceWorker:
                                 self.database_handler.save_extraction_results(results)
                             except Exception as e:
                                 logger.error(f"Failed to save to database: {e}")
-                                self._log_error(file_path, "DATABASE_ERROR",
-                                                f"Failed to save to database: {e}")
+                                self._log_error(
+                                    file_path,
+                                    "DATABASE_ERROR",
+                                    f"Failed to save to database: {e}",
+                                )
                                 continue
 
                         self._move_file(file_path, self.processed_dir)
@@ -379,7 +422,9 @@ class InferenceWorker:
 
         # Start batch processing thread
         if self.database_handler:
-            self.processing_thread = threading.Thread(target=self._processing_loop, daemon=True)
+            self.processing_thread = threading.Thread(
+                target=self._processing_loop, daemon=True
+            )
             self.processing_thread.start()
             logger.info("Inference result processing thread started")
 

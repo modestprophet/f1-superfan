@@ -42,32 +42,23 @@ llm:
       
       **1. Identify Global Race Status**
       *   **Safety Car**: Check the top of the timing table or graphic for a "Safety Car" or "VSC" (Virtual Safety Car) notification.
+      *   **Red Flag**: Check for a RED FLAG indicator (often red background text or banner).
+      *   **Yellow Flag**: Check for a YELLOW FLAG indicator (often yellow background text or banner).
       *   **Lap Number**: Locate the current lap number.
       
-      **2. Determine the Table Type**
-      Analyze the data columns and headers to categorize the table into exactly one of the following types:
-      *   **`interval`**: Represents the time gap to the *driver directly ahead*.
-          *   *Visual Cue:* Column header "Interval".
-          *   *Data Pattern:* Times are random and varied (e.g., +0.5s, +1.2s, +0.3s).
-      *   **`gap`**: Represents the time gap to the *race leader*.
-          *   *Visual Cue:* Column header "Gap" or "Leader".
-          *   *Data Pattern:* Times increase sequentially as position rank drops.
-      *   **`tire_age`**: Represents the laps driven on the current tire.
-          *   *Visual Cue:* Header "Tire" or "Laps".
-          *   *Data Pattern:* Data consists of integers.
-      *   **`pitstops`**: Represents the count of pitstops.
-          *   *Visual Cue:* Header "Stops" or "Pit".
-          *   *Data Pattern:* Small integers (e.g., 0, 1, 2).
-      
-      **3. Extract Race Data (Rows)**
+      **2. Extract Race Data (Rows)**
       For each driver row visible, extract:
       *   **Position:** The integer rank.
       *   **Driver:** The 3-character driver code.
-      *   **Data:** The main value in the timing/data column.
       *   **Tire:** The tire compound character (S, M, H, I, W).
+      *   **Timing Data:** Populate ONLY the fields that are currently visible on the screen. Set others to `null`.
+          *   `gap_to_leader`: Time gap to leader (e.g., "Leader", "+2.408").
+          *   `interval`: Time gap to driver ahead (e.g., "+0.5s").
+          *   `laps_on_tire`: Integer count of laps on current tire.
+          *   `pit_stop_count`: Integer count of pit stops.
       *   **Flags:** Look for a red or yellow exclamation point icon next to the timing data.
-          *   Yellow exclamation point: **Investigation**
-          *   Red exclamation point: **Penalty**
+          *   Yellow exclamation point: **Investigation** (set `investigation` to true)
+          *   Red exclamation point: **Penalty** (set `penalty` to true)
       
       ### OUTPUT FORMAT
       Output **only** raw JSON.
@@ -77,12 +68,16 @@ llm:
       {
         "lap_number": integer,
         "safety_car": boolean,
-        "table_type": "string",
+        "red_flag": boolean,
+        "yellow_flag": boolean,
         "race_data": [
           {
             "position": integer,
             "driver": "string",
-            "data": "string or number",
+            "gap_to_leader": "string or null",
+            "interval": "string or null",
+            "laps_on_tire": integer or null,
+            "pit_stop_count": integer or null,
             "tire": "string",
             "investigation": boolean,
             "penalty": boolean
@@ -93,55 +88,45 @@ llm:
       
       ### EXAMPLES
       
-      **Example 1: Gap to Leader**
+      **Example 1: Gap to Leader visible**
       ```json
       {
         "lap_number": 4,
         "safety_car": true,
-        "table_type": "gap",
+        "red_flag": false,
+        "yellow_flag": true,
         "race_data": [
-          {"position": 1, "driver": "RUS", "data": "Leader", "tire": "M", "investigation": false, "penalty": false},
-          {"position": 2, "driver": "VER", "data": "+2.408", "tire": "S", "investigation": true, "penalty": false}
+          {"position": 1, "driver": "RUS", "gap_to_leader": "Leader", "interval": null, "laps_on_tire": null, "pit_stop_count": null, "tire": "M", "investigation": false, "penalty": false},
+          {"position": 2, "driver": "VER", "gap_to_leader": "+2.408", "interval": null, "laps_on_tire": null, "pit_stop_count": null, "tire": "S", "investigation": true, "penalty": false}
         ]
       }
       ```
       
-      **Example 2: Tire Age**
+      **Example 2: Tire Age visible**
       ```json
       {
         "lap_number": 15,
         "safety_car": false,
-        "table_type": "tire_age",
+        "red_flag": false,
+        "yellow_flag": false,
         "race_data": [
-          {"position": 1, "driver": "RUS", "data": "14", "tire": "M", "investigation": false, "penalty": false},
-          {"position": 2, "driver": "VER", "data": "17", "tire": "S", "investigation": false, "penalty": false}
+          {"position": 1, "driver": "RUS", "gap_to_leader": null, "interval": null, "laps_on_tire": 14, "pit_stop_count": null, "tire": "M", "investigation": false, "penalty": false},
+          {"position": 2, "driver": "VER", "gap_to_leader": null, "interval": null, "laps_on_tire": 17, "pit_stop_count": null, "tire": "S", "investigation": false, "penalty": false}
         ]
       }
       ```
       
-      **Example 3: Pitstop Count**
-      ```json
-      {
-        "lap_number": 23,
-        "safety_car": false,
-        "table_type": "pitstops",
-        "race_data": [
-          {"position": 1, "driver": "RUS", "data": 0, "tire": "H", "investigation": false, "penalty": false},
-          {"position": 2, "driver": "NOR", "data": 1, "tire": "M", "investigation": false, "penalty": false}
-        ]
-      }
-      ```
-      
-      **Example 4: Interval**
+      **Example 3: Interval visible**
       ```json
       {
         "lap_number": 4,
         "safety_car": false,
-        "table_type": "interval",
+        "red_flag": false,
+        "yellow_flag": false,
         "race_data": [
-          {"position": 1, "driver": "RUS", "data": "Leader", "tire": "M", "investigation": false, "penalty": false},
-          {"position": 2, "driver": "VER", "data": "+2.379", "tire": "S", "investigation": false, "penalty": false},
-          {"position": 3, "driver": "NOR", "data": "+1.187", "tire": "M", "investigation": false, "penalty": true}
+          {"position": 1, "driver": "RUS", "gap_to_leader": null, "interval": "Leader", "laps_on_tire": null, "pit_stop_count": null, "tire": "M", "investigation": false, "penalty": false},
+          {"position": 2, "driver": "VER", "gap_to_leader": null, "interval": "+2.379", "laps_on_tire": null, "pit_stop_count": null, "tire": "S", "investigation": false, "penalty": false},
+          {"position": 3, "driver": "NOR", "gap_to_leader": null, "interval": "+1.187", "laps_on_tire": null, "pit_stop_count": null, "tire": "M", "investigation": false, "penalty": true}
         ]
       }
       ```
