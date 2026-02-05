@@ -18,25 +18,36 @@ class ImageProcessor:
         self.capture_thread = None
         self._initialized = False
 
-        resolution = self.config.get('camera.resolution', '1280x720')
-        fps = self.config.get('camera.fps', 30)
+        resolution = self.config.get("camera.resolution", "1280x720")
+        fps = self.config.get("camera.fps", 30)
+        self.rotation = self.config.get("camera.rotation", 0)
 
-        self.width, self.height = map(int, resolution.split('x'))
+        self.width, self.height = map(int, resolution.split("x"))
         self.fps = fps
-        self.temp_frame_path = '/tmp/current_frame.raw'
+        self.temp_frame_path = "/tmp/current_frame.raw"
 
     def _capture_single_frame_subprocess(self):
         try:
+            flip_method = 2 if self.rotation == 180 else 0
+
             cmd = [
-                'gst-launch-1.0',
-                'nvarguscamerasrc', 'num-buffers=1', '!',
-                f'video/x-raw(memory:NVMM),width={self.width},height={self.height},format=NV12,framerate={self.fps}/1',
-                '!',
-                'nvvidconv', '!',
-                'video/x-raw,format=BGRx', '!',
-                'videoconvert', '!',
-                'video/x-raw,format=BGR', '!',
-                'filesink', f'location={self.temp_frame_path}'
+                "gst-launch-1.0",
+                "nvarguscamerasrc",
+                "num-buffers=1",
+                "!",
+                f"video/x-raw(memory:NVMM),width={self.width},height={self.height},format=NV12,framerate={self.fps}/1",
+                "!",
+                "nvvidconv",
+                f"flip-method={flip_method}",
+                "!",
+                "video/x-raw,format=BGRx",
+                "!",
+                "videoconvert",
+                "!",
+                "video/x-raw,format=BGR",
+                "!",
+                "filesink",
+                f"location={self.temp_frame_path}",
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -44,10 +55,12 @@ class ImageProcessor:
                 logger.error(f"GStreamer error: {result.stderr}")
                 return None
 
-            with open(self.temp_frame_path, 'rb') as f:
+            with open(self.temp_frame_path, "rb") as f:
                 raw_data = f.read()
 
-            frame = np.frombuffer(raw_data, dtype=np.uint8).reshape((self.height, self.width, 3))
+            frame = np.frombuffer(raw_data, dtype=np.uint8).reshape(
+                (self.height, self.width, 3)
+            )
             os.remove(self.temp_frame_path)
             return frame
 
