@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 import os
 import tempfile
-from src.periodic_control import periodic_enabled
+from src.control_manager import control_manager
 
 logger = logging.getLogger(__name__)
 
@@ -19,36 +19,40 @@ class F1SuperfanServer:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_dir)
 
-        self.manual_images_dir = self.config.get('capture.storage_paths.manual', 'data/manual')
+        self.manual_images_dir = self.config.get(
+            "capture.storage_paths.manual", "data/manual"
+        )
 
-        template_folder = os.path.join(project_root, 'templates')
-        static_folder = os.path.join(project_root, 'static')
+        template_folder = os.path.join(project_root, "templates")
+        static_folder = os.path.join(project_root, "static")
 
-        self.app = Flask(__name__,
-                         template_folder=template_folder,
-                         static_folder=static_folder)
+        self.app = Flask(
+            __name__, template_folder=template_folder, static_folder=static_folder
+        )
 
         self._register_routes()
 
         logger.info("Flask server initialized")
 
     def _register_routes(self):
-        @self.app.route('/')
+        @self.app.route("/")
         def index():
-            return render_template('index.html')
+            return render_template("index.html")
 
-        @self.app.route('/video_feed')
+        @self.app.route("/video_feed")
         def video_feed():
-            return Response(self._generate_video_stream(),
-                            mimetype='multipart/x-mixed-replace; boundary=frame')
+            return Response(
+                self._generate_video_stream(),
+                mimetype="multipart/x-mixed-replace; boundary=frame",
+            )
 
-        @self.app.route('/manual_capture', methods=['POST'])
+        @self.app.route("/manual_capture", methods=["POST"])
         def manual_capture():
             if not self.image_processor.is_initialized():
-                return jsonify({'error': 'Camera not available'}), 503
+                return jsonify({"error": "Camera not available"}), 503
 
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            input_dir = self.config.get('capture.storage_paths.manual', 'data/manual')
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            input_dir = self.config.get("capture.storage_paths.manual", "data/manual")
             filename = f"manual_{timestamp}.jpg"
             output_path = os.path.join(input_dir, filename)
 
@@ -56,36 +60,40 @@ class F1SuperfanServer:
 
             if success:
                 logger.info(f"Manual capture: {filename}")
-                return jsonify({
-                    'success': True,
-                    'filename': filename,
-                    'message': 'Frame captured successfully'
-                })
+                return jsonify(
+                    {
+                        "success": True,
+                        "filename": filename,
+                        "message": "Frame captured successfully",
+                    }
+                )
 
-            return jsonify({'error': 'Failed to capture frame'}), 500
+            return jsonify({"error": "Failed to capture frame"}), 500
 
-        @self.app.route('/adhoc_inference', methods=['POST'])
+        @self.app.route("/adhoc_inference", methods=["POST"])
         def adhoc_inference():
             if not self.image_processor.is_initialized():
-                return jsonify({'error': 'Camera not available'}), 503
+                return jsonify({"error": "Camera not available"}), 503
 
             if not self.inference_worker:
-                return jsonify({'error': 'Inference worker not available'}), 503
+                return jsonify({"error": "Inference worker not available"}), 503
 
             data = request.get_json()
-            custom_prompt = data.get('prompt', 'describe the numerical data you see in this image')
+            custom_prompt = data.get(
+                "prompt", "describe the numerical data you see in this image"
+            )
 
             if not custom_prompt:
-                return jsonify({'error': 'Prompt is required'}), 400
+                return jsonify({"error": "Prompt is required"}), 400
 
             logger.info(f"Live inference: {custom_prompt}")
 
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
                 temp_path = temp_file.name
 
             success = self.image_processor.capture_single_frame(temp_path)
             if not success:
-                return jsonify({'error': 'Failed to capture frame'}), 500
+                return jsonify({"error": "Failed to capture frame"}), 500
 
             response_text = self.inference_worker._call_llm(temp_path, custom_prompt)
 
@@ -95,124 +103,158 @@ class F1SuperfanServer:
                 logger.warning(f"Failed to delete temp file: {e}")
 
             if response_text is None:
-                return jsonify({'error': 'Inference failed'}), 500
+                return jsonify({"error": "Inference failed"}), 500
 
-            return jsonify({
-                'success': True,
-                'response': response_text,
-                'prompt': custom_prompt
-            })
+            return jsonify(
+                {"success": True, "response": response_text, "prompt": custom_prompt}
+            )
 
-        @self.app.route('/status')
+        @self.app.route("/status")
         def status():
-            return jsonify({
-                'camera_initialized': self.image_processor.is_initialized(),
-                'inference_worker_running': self.inference_worker.running if self.inference_worker else False,
-                'capture_mode': self.config.get('capture.mode', 'unknown')
-            })
+            return jsonify(
+                {
+                    "camera_initialized": self.image_processor.is_initialized(),
+                    "inference_worker_running": control_manager.inference_enabled,
+                    "capture_mode": self.config.get("capture.mode", "unknown"),
+                }
+            )
 
-        @self.app.route('/manual_images/list', methods=['GET'])
+        @self.app.route("/manual_images/list", methods=["GET"])
         def list_manual_images():
             if not os.path.exists(self.manual_images_dir):
-                return jsonify({'error': 'Manual images directory not found'}), 404
+                return jsonify({"error": "Manual images directory not found"}), 404
 
             image_files = [
-                f for f in os.listdir(self.manual_images_dir)
-                if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+                f
+                for f in os.listdir(self.manual_images_dir)
+                if f.lower().endswith((".png", ".jpg", ".jpeg"))
             ]
             image_files.sort()
 
             logger.info(f"Found {len(image_files)} manual images")
-            return jsonify({
-                'success': True,
-                'files': image_files,
-                'directory': self.manual_images_dir
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "files": image_files,
+                    "directory": self.manual_images_dir,
+                }
+            )
 
-        @self.app.route('/manual_images/process_custom', methods=['POST'])
+        @self.app.route("/manual_images/process_custom", methods=["POST"])
         def process_manual_image_custom():
             if not self.inference_worker:
-                return jsonify({'error': 'Inference worker not available'}), 503
+                return jsonify({"error": "Inference worker not available"}), 503
 
             data = request.get_json()
-            filename = data.get('filename')
-            custom_prompt = data.get('prompt')
+            filename = data.get("filename")
+            custom_prompt = data.get("prompt")
 
             if not filename:
-                return jsonify({'error': 'Filename is required'}), 400
+                return jsonify({"error": "Filename is required"}), 400
             if not custom_prompt:
-                return jsonify({'error': 'Prompt is required'}), 400
+                return jsonify({"error": "Prompt is required"}), 400
 
             image_path = os.path.join(self.manual_images_dir, filename)
             if not os.path.exists(image_path):
-                return jsonify({'error': 'Image file not found'}), 404
+                return jsonify({"error": "Image file not found"}), 404
 
             logger.info(f"Processing manual image: {filename}")
 
             response_text = self.inference_worker._call_llm(image_path, custom_prompt)
             if response_text is None:
-                return jsonify({'error': 'Inference failed'}), 500
+                return jsonify({"error": "Inference failed"}), 500
 
-            return jsonify({
-                'success': True,
-                'filename': filename,
-                'prompt': custom_prompt,
-                'response': response_text
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "filename": filename,
+                    "prompt": custom_prompt,
+                    "response": response_text,
+                }
+            )
 
-        @self.app.route('/api/race_config', methods=['GET', 'POST'])
+        @self.app.route("/api/race_config", methods=["GET", "POST"])
         def race_config():
             if not self.inference_worker:
-                return jsonify({'error': 'Inference worker not available'}), 503
+                return jsonify({"error": "Inference worker not available"}), 503
 
-            if request.method == 'GET':
+            if request.method == "GET":
                 return jsonify(self.inference_worker.current_race_metadata)
 
-            elif request.method == 'POST':
+            elif request.method == "POST":
                 data = request.get_json()
-                valid_keys = {'year', 'race_number', 'circuit_name', 'race_id'}
+                valid_keys = {"year", "race_number", "circuit_name", "race_id"}
                 new_metadata = {k: v for k, v in data.items() if k in valid_keys}
 
                 try:
-                    if 'year' in new_metadata: new_metadata['year'] = int(new_metadata['year'])
-                    if 'race_number' in new_metadata: new_metadata['race_number'] = int(new_metadata['race_number'])
-                    if 'race_id' in new_metadata: new_metadata['race_id'] = int(new_metadata['race_id'])
+                    if "year" in new_metadata:
+                        new_metadata["year"] = int(new_metadata["year"])
+                    if "race_number" in new_metadata:
+                        new_metadata["race_number"] = int(new_metadata["race_number"])
+                    if "race_id" in new_metadata:
+                        new_metadata["race_id"] = int(new_metadata["race_id"])
                 except ValueError:
-                    return jsonify({'error': 'Invalid data types'}), 400
+                    return jsonify({"error": "Invalid data types"}), 400
 
                 self.inference_worker.update_race_metadata(new_metadata)
-                return jsonify({'success': True, 'metadata': self.inference_worker.current_race_metadata})
+                return jsonify(
+                    {
+                        "success": True,
+                        "metadata": self.inference_worker.current_race_metadata,
+                    }
+                )
 
-        @self.app.route('/periodic/pause', methods=['POST'])
-        def pause_periodic():
-            """Pause the periodic capture loop."""
-            periodic_enabled.clear()
-            logger.info("Periodic capture paused")
-            return jsonify({'status': 'paused', 'running': False})
+        @self.app.route("/api/control/capture/status", methods=["GET"])
+        def capture_status():
+            """Get capture control status."""
+            return jsonify({"running": control_manager.capture_enabled})
 
-        @self.app.route('/periodic/resume', methods=['POST'])
-        def resume_periodic():
-            """Resume the periodic capture loop."""
-            periodic_enabled.set()
-            logger.info("Periodic capture resumed")
-            return jsonify({'status': 'running', 'running': True})
+        @self.app.route("/api/control/capture/pause", methods=["POST"])
+        def pause_capture():
+            """Pause the capture loop."""
+            control_manager.set_capture(False)
+            logger.info("Capture control paused")
+            return jsonify({"status": "paused", "running": False})
 
-        @self.app.route('/periodic/status', methods=['GET'])
-        def periodic_status():
-            """Report whether periodic capture is currently active."""
-            return jsonify({'running': periodic_enabled.is_set()})
+        @self.app.route("/api/control/capture/resume", methods=["POST"])
+        def resume_capture():
+            """Resume the capture loop."""
+            control_manager.set_capture(True)
+            logger.info("Capture control resumed")
+            return jsonify({"status": "running", "running": True})
+
+        @self.app.route("/api/control/inference/status", methods=["GET"])
+        def inference_status():
+            """Get inference control status."""
+            return jsonify({"running": control_manager.inference_enabled})
+
+        @self.app.route("/api/control/inference/pause", methods=["POST"])
+        def pause_inference():
+            """Pause the inference loop."""
+            control_manager.set_inference(False)
+            logger.info("Inference control paused")
+            return jsonify({"status": "paused", "running": False})
+
+        @self.app.route("/api/control/inference/resume", methods=["POST"])
+        def resume_inference():
+            """Resume the inference loop."""
+            control_manager.set_inference(True)
+            logger.info("Inference control resumed")
+            return jsonify({"status": "running", "running": True})
 
     def _generate_video_stream(self):
         while True:
             frame = self.image_processor.get_current_frame()
             if frame is not None:
-                ret, buffer = cv2.imencode('.jpg', frame)
+                ret, buffer = cv2.imencode(".jpg", frame)
                 if ret:
                     frame_bytes = buffer.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
+                    )
             time.sleep(0.033)  # ~30 FPS
 
-    def run(self, host='0.0.0.0', port=5000):
+    def run(self, host="0.0.0.0", port=5000):
         logger.info(f"Starting Flask server on {host}:{port}")
         self.app.run(host=host, port=port, debug=False, threaded=True)

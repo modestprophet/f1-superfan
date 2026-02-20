@@ -11,7 +11,7 @@ from src.image_processor import ImageProcessor
 from src.inference_worker import InferenceWorker
 from src.server import F1SuperfanServer
 from src.database import DatabaseHandler
-from src.periodic_control import periodic_enabled
+from src.control_manager import control_manager
 
 
 class F1SuperfanApp:
@@ -26,16 +26,16 @@ class F1SuperfanApp:
         self.running = False
 
     def setup_logging(self):
-        log_level = self.config.get('logging.level', 'INFO')
+        log_level = self.config.get("logging.level", "INFO")
         setup_logging(log_level)
         self.logger = logging.getLogger(__name__)
         return self.logger
 
     def initialize_directories(self):
         directories = [
-            self.config.get('capture.storage_paths.input'),
-            self.config.get('capture.storage_paths.processed'),
-            self.config.get('capture.storage_paths.failed')
+            self.config.get("capture.storage_paths.input"),
+            self.config.get("capture.storage_paths.processed"),
+            self.config.get("capture.storage_paths.failed"),
         ]
 
         for directory in directories:
@@ -50,32 +50,36 @@ class F1SuperfanApp:
         self.image_processor.start()
 
         self.logger.info("Initializing Inference Worker...")
-        self.inference_worker = InferenceWorker(self.config, database_handler=self.database_handler)
+        self.inference_worker = InferenceWorker(
+            self.config, database_handler=self.database_handler
+        )
         self.inference_worker.start()
 
         self.logger.info("Initializing Flask server...")
-        self.server = F1SuperfanServer(self.config, self.image_processor, self.inference_worker)
+        self.server = F1SuperfanServer(
+            self.config, self.image_processor, self.inference_worker
+        )
 
     def _periodic_capture_loop(self):
-        capture_config = self.config.get('capture', {})
-        mode = capture_config.get('mode', 'manual')
-        interval = capture_config.get('interval_seconds', 10)
+        capture_config = self.config.get("capture", {})
+        mode = capture_config.get("mode", "manual")
+        interval = capture_config.get("interval_seconds", 10)
 
-        if mode not in ['periodic', 'both']:
+        if mode not in ["periodic", "both"]:
             self.logger.info(f"Periodic capture disabled (mode: {mode})")
             return
 
         self.logger.info(f"Periodic capture enabled. Interval: {interval} seconds.")
         while self.running:
             # Check if periodic capture is paused
-            if not periodic_enabled.is_set():
+            if not control_manager.capture_enabled:
                 # Paused – wait a bit before checking again
                 time.sleep(1)
                 continue
 
             try:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                input_dir = self.config.get('capture.storage_paths.input', 'data/input')
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                input_dir = self.config.get("capture.storage_paths.input", "data/input")
                 filename = f"periodic_{timestamp}.jpg"
                 output_path = os.path.join(input_dir, filename)
 
@@ -110,7 +114,9 @@ class F1SuperfanApp:
             self.initialize_directories()
             self.initialize_components()
 
-            self.periodic_capture_thread = threading.Thread(target=self._periodic_capture_loop, daemon=True)
+            self.periodic_capture_thread = threading.Thread(
+                target=self._periodic_capture_loop, daemon=True
+            )
             self.periodic_capture_thread.start()
 
             self.setup_signal_handlers()
@@ -148,5 +154,5 @@ def main():
     app.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

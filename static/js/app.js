@@ -16,8 +16,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const confRaceId = document.getElementById('conf-race-id');
     const saveConfigBtn = document.getElementById('save-config-btn');
     const configStatus = document.getElementById('config-status');
-    const togglePeriodicBtn = document.getElementById('toggle-periodic');
-    const periodicIndicator = document.getElementById('periodic-indicator');
+    const toggleCaptureBtn = document.getElementById('toggle-capture');
+    const captureIndicator = document.getElementById('capture-indicator');
+    const toggleInferenceBtn = document.getElementById('toggle-inference');
+    const inferenceIndicator = document.getElementById('inference-indicator');
 
     // Manual capture handler
     manualCaptureBtn.addEventListener('click', async function() {
@@ -179,7 +181,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Save Race Configuration
-saveConfigBtn.addEventListener('click', async function() {
+    saveConfigBtn.addEventListener('click', async function() {
         try {
             saveConfigBtn.disabled = true;
             configStatus.textContent = 'Saving...';
@@ -253,6 +255,147 @@ saveConfigBtn.addEventListener('click', async function() {
         loadManualImages();
     });
 
+    // Helper function to update capture UI
+    function setCaptureRunning(running) {
+        if (running) {
+            toggleCaptureBtn.textContent = '⏸️ Pause Capture';
+            captureIndicator.className = 'dot green';
+            captureIndicator.title = 'Capture active';
+        } else {
+            toggleCaptureBtn.textContent = '▶️ Resume Capture';
+            captureIndicator.className = 'dot red';
+            captureIndicator.title = 'Capture paused';
+        }
+    }
+
+    // Helper function to update inference UI
+    function setInferenceRunning(running) {
+        if (running) {
+            toggleInferenceBtn.textContent = '⏸️ Pause Inference';
+            inferenceIndicator.className = 'dot green';
+            inferenceIndicator.title = 'Inference active';
+        } else {
+            toggleInferenceBtn.textContent = '▶️ Resume Inference';
+            inferenceIndicator.className = 'dot red';
+            inferenceIndicator.title = 'Inference paused';
+        }
+    }
+
+    // Load initial capture state
+    async function loadCaptureStatus() {
+        try {
+            const response = await fetch('/api/control/capture/status');
+            const data = await response.json();
+            setCaptureRunning(data.running);
+        } catch (error) {
+            console.error('Error loading capture status:', error);
+            setCaptureRunning(false);
+        }
+    }
+
+    // Load initial inference state
+    async function loadInferenceStatus() {
+        try {
+            const response = await fetch('/api/control/inference/status');
+            const data = await response.json();
+            setInferenceRunning(data.running);
+        } catch (error) {
+            console.error('Error loading inference status:', error);
+            setInferenceRunning(false);
+        }
+    }
+
+    // Toggle capture handler
+    toggleCaptureBtn.addEventListener('click', async function() {
+        try {
+            toggleCaptureBtn.disabled = true;
+            const action = toggleCaptureBtn.textContent.includes('Pause') ? 'pause' : 'resume';
+            
+            const response = await fetch(`/api/control/capture/${action}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                setCaptureRunning(data.running);
+                
+                // Show brief status message
+                statusMessage.textContent = data.running ? '✓ Capture resumed' : '✓ Capture paused';
+                statusMessage.style.color = '#44ff44';
+                setTimeout(() => {
+                    statusMessage.textContent = '';
+                }, 2000);
+            } else {
+                console.error('Failed to toggle capture:', data);
+                statusMessage.textContent = '✗ Failed to toggle capture';
+                statusMessage.style.color = '#ff4444';
+            }
+
+        } catch (error) {
+            console.error('Error toggling capture:', error);
+            statusMessage.textContent = '✗ Error: ' + error.message;
+            statusMessage.style.color = '#ff4444';
+        } finally {
+            toggleCaptureBtn.disabled = false;
+        }
+    });
+
+    // Toggle inference handler
+    toggleInferenceBtn.addEventListener('click', async function() {
+        try {
+            toggleInferenceBtn.disabled = true;
+            const action = toggleInferenceBtn.textContent.includes('Pause') ? 'pause' : 'resume';
+            
+            const response = await fetch(`/api/control/inference/${action}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                setInferenceRunning(data.running);
+                
+                // Show brief status message
+                statusMessage.textContent = data.running ? '✓ Inference resumed' : '✓ Inference paused';
+                statusMessage.style.color = '#44ff44';
+                setTimeout(() => {
+                    statusMessage.textContent = '';
+                }, 2000);
+            } else {
+                console.error('Failed to toggle inference:', data);
+                statusMessage.textContent = '✗ Failed to toggle inference';
+                statusMessage.style.color = '#ff4444';
+            }
+
+        } catch (error) {
+            console.error('Error toggling inference:', error);
+            statusMessage.textContent = '✗ Error: ' + error.message;
+            statusMessage.style.color = '#ff4444';
+        } finally {
+            toggleInferenceBtn.disabled = false;
+        }
+    });
+
+    // Load manual images on page load
+    loadManualImages();
+
+    // Load control status on load
+    loadCaptureStatus();
+    loadInferenceStatus();
+
+    // Load Race Config on load
+    loadRaceConfig();
+
+    // Refresh status periodically
+    setInterval(checkStatus, 30000); // Every 30 seconds
+
     // Check system status
     async function checkStatus() {
         try {
@@ -270,86 +413,4 @@ saveConfigBtn.addEventListener('click', async function() {
             console.error('Error checking status:', error);
         }
     }
-
-    // Load manual images on page load
-    loadManualImages();
-
-    // Check status on load
-    checkStatus();
-
-
-    // Load Race Config on load
-    loadRaceConfig();
-
-    // Refresh status periodically
-    setInterval(checkStatus, 30000); // Every 30 seconds
-
-    // ------------ Periodic Capture Control -------------
-    
-    // Helper function to update UI based on periodic capture state
-    function setPeriodicRunning(running) {
-        if (running) {
-            togglePeriodicBtn.textContent = '⏸️ Pause Periodic Capture';
-            periodicIndicator.className = 'dot green';
-            periodicIndicator.title = 'Periodic capture running';
-        } else {
-            togglePeriodicBtn.textContent = '▶️ Resume Periodic Capture';
-            periodicIndicator.className = 'dot red';
-            periodicIndicator.title = 'Periodic capture paused';
-        }
-    }
-
-    // Load initial periodic capture state
-    async function loadPeriodicStatus() {
-        try {
-            const response = await fetch('/periodic/status');
-            const data = await response.json();
-            setPeriodicRunning(data.running);
-        } catch (error) {
-            console.error('Error loading periodic status:', error);
-            setPeriodicRunning(false);  // fallback
-        }
-    }
-
-    // Toggle periodic capture handler
-    togglePeriodicBtn.addEventListener('click', async function() {
-        try {
-            togglePeriodicBtn.disabled = true;
-            const action = togglePeriodicBtn.textContent.includes('Pause') ? 'pause' : 'resume';
-            
-            const response = await fetch(`/periodic/${action}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                setPeriodicRunning(data.running);
-                
-                // Show brief status message
-                statusMessage.textContent = data.running ? '✓ Periodic capture resumed' : '✓ Periodic capture paused';
-                statusMessage.style.color = '#44ff44';
-                setTimeout(() => {
-                    statusMessage.textContent = '';
-                }, 2000);
-            } else {
-                console.error('Failed to toggle periodic capture:', data);
-                statusMessage.textContent = '✗ Failed to toggle periodic capture';
-                statusMessage.style.color = '#ff4444';
-            }
-
-        } catch (error) {
-            console.error('Error toggling periodic capture:', error);
-            statusMessage.textContent = '✗ Error: ' + error.message;
-            statusMessage.style.color = '#ff4444';
-        } finally {
-            togglePeriodicBtn.disabled = false;
-        }
-    });
-
-    // Load periodic status on page load
-    loadPeriodicStatus();
 });
