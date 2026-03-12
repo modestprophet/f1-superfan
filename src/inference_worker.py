@@ -8,6 +8,7 @@ import requests
 from datetime import datetime
 from together import Together
 from src.utils import validate_json_structure, ensure_directory_exists
+from src.control_manager import control_manager
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class InferenceWorker:
                 "race_number": 0,
                 "circuit_name": "Unknown",
                 "race_id": 0,
+                "lap": 0,
             },
         )
 
@@ -342,6 +344,10 @@ class InferenceWorker:
 
         while self.running:
             try:
+                if not control_manager.inference_enabled:
+                    time.sleep(1)
+                    continue
+
                 current_time = time.time()
                 time_since_last = current_time - self.last_processing_time
 
@@ -362,6 +368,10 @@ class InferenceWorker:
 
         while self.running:
             try:
+                if not control_manager.inference_enabled:
+                    time.sleep(1)
+                    continue
+
                 input_files = [
                     f
                     for f in os.listdir(self.input_dir)

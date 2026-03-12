@@ -80,7 +80,12 @@ class F1SuperfanApp:
             try:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 input_dir = self.config.get("capture.storage_paths.input", "data/input")
-                filename = f"periodic_{timestamp}.jpg"
+                
+                race_id = "0"
+                if self.inference_worker and hasattr(self.inference_worker, 'current_race_metadata'):
+                    race_id = self.inference_worker.current_race_metadata.get("race_id", "0")
+                
+                filename = f"periodic_{race_id}_{timestamp}.jpg"
                 output_path = os.path.join(input_dir, filename)
 
                 success = self.image_processor.capture_single_frame(output_path)

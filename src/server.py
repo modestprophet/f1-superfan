@@ -53,7 +53,12 @@ class F1SuperfanServer:
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             input_dir = self.config.get("capture.storage_paths.manual", "data/manual")
-            filename = f"manual_{timestamp}.jpg"
+            
+            meta = self.inference_worker.current_race_metadata if self.inference_worker else {}
+            race_id = meta.get("race_id", "0")
+            lap = meta.get("lap", "0")
+            
+            filename = f"manual_{race_id}_{lap}_{timestamp}.jpg"
             output_path = os.path.join(input_dir, filename)
 
             success = self.image_processor.capture_single_frame(output_path)
@@ -183,7 +188,7 @@ class F1SuperfanServer:
 
             elif request.method == "POST":
                 data = request.get_json()
-                valid_keys = {"year", "race_number", "circuit_name", "race_id"}
+                valid_keys = {"year", "race_number", "circuit_name", "race_id", "lap"}
                 new_metadata = {k: v for k, v in data.items() if k in valid_keys}
 
                 try:
@@ -193,6 +198,8 @@ class F1SuperfanServer:
                         new_metadata["race_number"] = int(new_metadata["race_number"])
                     if "race_id" in new_metadata:
                         new_metadata["race_id"] = int(new_metadata["race_id"])
+                    if "lap" in new_metadata:
+                        new_metadata["lap"] = int(new_metadata["lap"])
                 except ValueError:
                     return jsonify({"error": "Invalid data types"}), 400
 

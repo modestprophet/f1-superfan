@@ -21,6 +21,10 @@ class ImageProcessor:
         resolution = self.config.get("camera.resolution", "1280x720")
         fps = self.config.get("camera.fps", 30)
         self.rotation = self.config.get("camera.rotation", 0)
+        self.exposure_compensation = self.config.get(
+            "camera.exposure_compensation", 0.0
+        )
+        self.gain_range = self.config.get("camera.gain_range", None)
 
         self.width, self.height = map(int, resolution.split("x"))
         self.fps = fps
@@ -33,22 +37,35 @@ class ImageProcessor:
             cmd = [
                 "gst-launch-1.0",
                 "nvarguscamerasrc",
-                "num-buffers=1",
-                "!",
-                f"video/x-raw(memory:NVMM),width={self.width},height={self.height},format=NV12,framerate={self.fps}/1",
-                "!",
-                "nvvidconv",
-                f"flip-method={flip_method}",
-                "!",
-                "video/x-raw,format=BGRx",
-                "!",
-                "videoconvert",
-                "!",
-                "video/x-raw,format=BGR",
-                "!",
-                "filesink",
-                f"location={self.temp_frame_path}",
             ]
+
+            # Exposure compensation range: -2.0 to 2.0
+            if self.exposure_compensation != 0.0:
+                cmd.append(f"exposurecompensation={self.exposure_compensation}")
+
+            # Analog gain (ISO equivalent)
+            if self.gain_range:
+                cmd.append(f"gainrange={self.gain_range}")
+
+            cmd.extend(
+                [
+                    "num-buffers=1",
+                    "!",
+                    f"video/x-raw(memory:NVMM),width={self.width},height={self.height},format=NV12,framerate={self.fps}/1",
+                    "!",
+                    "nvvidconv",
+                    f"flip-method={flip_method}",
+                    "!",
+                    "video/x-raw,format=BGRx",
+                    "!",
+                    "videoconvert",
+                    "!",
+                    "video/x-raw,format=BGR",
+                    "!",
+                    "filesink",
+                    f"location={self.temp_frame_path}",
+                ]
+            )
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             if result.returncode != 0:
