@@ -1,4 +1,13 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    Float,
+    String,
+    Text,
+    DateTime,
+    Boolean,
+)
 from sqlalchemy.orm import sessionmaker, declarative_base
 from datetime import datetime
 import json
@@ -20,16 +29,17 @@ class InferenceResult(Base):
     race_number = Column(Integer, nullable=True)
     circuit_name = Column(String(100), nullable=True)
     race_id = Column(Integer, nullable=True)
+
     lap_number = Column(Integer, nullable=True)
-    table_type = Column(String(50), nullable=True)
-    safety_car_status = Column(Integer, default=0)
-    yellow_flag_status = Column(Integer, default=0)
-    red_flag_status = Column(Integer, default=0)
+    conditions_air_temp = Column(Float, nullable=True)
+    conditions_track_temp = Column(Float, nullable=True)
+    wind = Column(Float, nullable=True)
+
     data_json = Column(Text, nullable=True)
     processing_status = Column(String(20), default="new")
 
     def __repr__(self):
-        return f"<InferenceResult(id={self.id}, lap={self.lap_number}, type={self.table_type}, race={self.race_number})>"
+        return f"<InferenceResult(id={self.id}, lap={self.lap_number}, race={self.race_number})>"
 
 
 class RaceTimingData(Base):
@@ -45,29 +55,24 @@ class RaceTimingData(Base):
     race_number = Column(Integer, nullable=True)
     circuit_name = Column(String(100), nullable=True)
     race_id = Column(Integer, nullable=True)
-    lap_number = Column(Integer, nullable=False)
+    lap_number = Column(Integer, nullable=True)
 
     position = Column(Integer, nullable=False)
-    driver_code = Column(String(3), nullable=False)
-    tire_compound = Column(String(1), nullable=True)
+    driver_code = Column(String(50), nullable=False)
+    position_delta = Column(Integer, nullable=True)
 
-    gap_to_leader = Column(String(20), nullable=True)
+    gap = Column(String(20), nullable=True)
+    in_pit = Column(Boolean, default=False)
+    out_retired = Column(Boolean, default=False)
+
     interval = Column(String(20), nullable=True)
+    last_lap = Column(String(20), nullable=True)
+
+    current_tire = Column(String(1), nullable=True)
     tire_age = Column(Integer, nullable=True)
-    pitstop_count = Column(Integer, nullable=True)
-
-    is_in_pit = Column(Integer, default=0)
-    is_out = Column(Integer, default=0)
-    is_safety_car = Column(Integer, default=0)
-    is_yellow_flag = Column(Integer, default=0)
-    is_red_flag = Column(Integer, default=0)
-    is_under_investigation = Column(Integer, default=0)
-    has_penalty = Column(Integer, default=0)
-
-    table_type = Column(String(20), nullable=False)
 
     def __repr__(self):
-        return f"<RaceTimingData(lap={self.lap_number}, pos={self.position}, driver={self.driver_code}, type={self.table_type})>"
+        return f"<RaceTimingData(lap={self.lap_number}, pos={self.position}, driver={self.driver_code})>"
 
 
 class DatabaseHandler:
@@ -77,6 +82,7 @@ class DatabaseHandler:
         self.config = config
         db_path = self.config.get("database.path", "data/f1_data.db")
 
+        # If we need a fresh db as requested, we could drop the tables, but we will let user delete db file or drop tables.
         db_dir = os.path.dirname(db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
@@ -105,14 +111,11 @@ class DatabaseHandler:
                 race_number=race_metadata.get("race_number"),
                 circuit_name=race_metadata.get("circuit_name"),
                 race_id=race_metadata.get("race_id"),
-                lap_number=data.get("lap_number"),
-                table_type=data.get("table_type", "unified"),
-                safety_car_status=1 if data.get("safety_car") else 0,
-                yellow_flag_status=1 if data.get("yellow_flag") else 0,
-                red_flag_status=1 if data.get("red_flag") else 0,
-                data_json=json.dumps(
-                    data.get("timing_data", data.get("timing_table", data))
-                ),
+                lap_number=data.get("current_lap"),
+                conditions_air_temp=data.get("conditions_air_temp"),
+                conditions_track_temp=data.get("conditions_track_temp"),
+                wind=data.get("wind"),
+                data_json=json.dumps(data),
                 processing_status="new",
             )
 
@@ -179,33 +182,17 @@ class DatabaseHandler:
                 )
                 return False
 
-            table_type = inference_result.table_type
             lap_number = inference_result.lap_number
 
             for driver_entry in race_data:
                 position = driver_entry.get("position")
-                driver_code = driver_entry.get("driver")
-                tire = driver_entry.get("tire")
-                investigation = driver_entry.get("investigation", False)
-                penalty = driver_entry.get("penalty", False)
-
-                gap_to_leader = driver_entry.get("gap_to_leader")
-                interval = driver_entry.get("interval")
-                tire_age = driver_entry.get("laps_on_tire")
-                pitstop_count = driver_entry.get("pit_stop_count")
+                driver_code = driver_entry.get("driver_code")
 
                 if not position or not driver_code:
                     logger.warning(
                         f"Missing position or driver in entry: {driver_entry}"
                     )
                     continue
-
-                # Check for PIT/OUT status in timing fields
-                gap_str = str(gap_to_leader).upper() if gap_to_leader else ""
-                interval_str = str(interval).upper() if interval else ""
-
-                is_in_pit = 1 if "PIT" in gap_str or "PIT" in interval_str else 0
-                is_out = 1 if "OUT" in gap_str or "OUT" in interval_str else 0
 
                 record = RaceTimingData(
                     inference_result_id=inference_result.id,
@@ -217,19 +204,14 @@ class DatabaseHandler:
                     lap_number=lap_number,
                     position=position,
                     driver_code=driver_code,
-                    tire_compound=tire,
-                    gap_to_leader=gap_to_leader,
-                    interval=interval,
-                    tire_age=tire_age,
-                    pitstop_count=pitstop_count,
-                    is_in_pit=is_in_pit,
-                    is_out=is_out,
-                    is_safety_car=inference_result.safety_car_status,
-                    is_yellow_flag=inference_result.yellow_flag_status,
-                    is_red_flag=inference_result.red_flag_status,
-                    is_under_investigation=1 if investigation else 0,
-                    has_penalty=1 if penalty else 0,
-                    table_type=table_type,
+                    position_delta=driver_entry.get("position_delta"),
+                    gap=driver_entry.get("gap"),
+                    in_pit=driver_entry.get("in_pit", False),
+                    out_retired=driver_entry.get("out_retired", False),
+                    interval=driver_entry.get("interval"),
+                    last_lap=driver_entry.get("last_lap"),
+                    current_tire=driver_entry.get("current_tire"),
+                    tire_age=driver_entry.get("tire_age"),
                 )
 
                 session.add(record)
